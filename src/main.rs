@@ -12,8 +12,8 @@ use chrono::Local;
 use gtk::glib;
 use gtk::{
     Align, Box as GtkBox, Button, FileChooserAction, FileChooserNative, ListBox, ListBoxRow,
-    EventControllerKey, Label, Orientation, Overlay, PolicyType, ScrolledWindow, SelectionMode,
-    StringList, TextBuffer, TextView, TextWindowType,
+    EventControllerKey, Image, Label, Orientation, Overlay, PolicyType, ScrolledWindow,
+    SelectionMode, StringList, TextBuffer, TextView, TextWindowType,
 };
 use serde::{Deserialize, Serialize};
 
@@ -120,6 +120,15 @@ struct CommandMenuState {
 enum CommandMenuAction {
     NoteLink(String),
     InsertText(String),
+}
+
+impl CommandMenuAction {
+    fn icon_name(&self) -> &'static str {
+        match self {
+            Self::NoteLink(_) => "text-x-generic-symbolic",
+            Self::InsertText(_) => "applications-system-symbolic",
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -373,13 +382,25 @@ fn populate_command_list(list: &ListBox, items: &[CommandMenuItem]) {
         let row = ListBoxRow::new();
         row.set_selectable(true);
         row.set_activatable(true);
-        let item = Label::new(Some(&item_data.label));
-        item.set_halign(Align::Start);
-        item.set_margin_top(4);
-        item.set_margin_bottom(4);
-        item.set_margin_start(8);
-        item.set_margin_end(8);
-        row.set_child(Some(&item));
+
+        let content = GtkBox::new(Orientation::Horizontal, 8);
+        content.set_margin_top(4);
+        content.set_margin_bottom(4);
+        content.set_margin_start(8);
+        content.set_margin_end(8);
+
+        let label = Label::new(Some(&item_data.label));
+        label.set_halign(Align::Start);
+        label.set_hexpand(true);
+        label.set_xalign(0.0);
+        content.append(&label);
+
+        let icon = Image::from_icon_name(item_data.action.icon_name());
+        icon.add_css_class("dim-label");
+        icon.set_halign(Align::End);
+        content.append(&icon);
+
+        row.set_child(Some(&content));
         list.append(&row);
     }
 }
