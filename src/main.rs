@@ -11,8 +11,9 @@ use adw::{
 use chrono::Local;
 use gtk::glib;
 use gtk::{
-    Box as GtkBox, Button, FileChooserAction, FileChooserNative, ListBox, ListBoxRow, Orientation,
-    PolicyType, ScrolledWindow, SelectionMode, StringList, TextBuffer, TextView,
+    Align, Box as GtkBox, Button, FileChooserAction, FileChooserNative, ListBox, ListBoxRow,
+    EventControllerKey, Label, Orientation, Overlay, PolicyType, ScrolledWindow, SelectionMode,
+    StringList, TextBuffer, TextView, TextWindowType,
 };
 use serde::{Deserialize, Serialize};
 
@@ -104,6 +105,15 @@ struct AppState {
     current_note: Option<PathBuf>,
     dirty: bool,
     loading_note: bool,
+}
+
+#[derive(Default)]
+struct CommandMenuState {
+    items: Vec<String>,
+    slash_offset: Option<i32>,
+    replace_end_offset: Option<i32>,
+    visible: bool,
+    suppress_change: bool,
 }
 
 fn config_dir() -> PathBuf {
@@ -247,6 +257,93 @@ fn list_markdown_files(dir: &Path) -> Vec<PathBuf> {
         b_time.cmp(&a_time)
     });
     files
+}
+
+fn linkable_note_titles(state: &Rc<RefCell<AppState>>) -> Vec<String> {
+    let (notes_dir, current_note) = {
+        let st = state.borrow();
+        (st.settings.notes_dir.clone(), st.current_note.clone())
+    };
+
+    let mut titles = Vec::new();
+    for path in list_markdown_files(&notes_dir) {
+        if current_note.as_ref() == Some(&path) {
+            continue;
+        }
+
+        let filename = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("note.md")
+            .to_string();
+        let title = fs::read_to_string(&path)
+            .map(|txt| note_title_from_markdown(&txt, &filename))
+            .unwrap_or(filename);
+        titles.push(title);
+    }
+
+    titles
+}
+
+fn slash_query_at_cursor(buffer: &TextBuffer) -> Option<(i32, i32, String)> {
+    let insert_mark = buffer.get_insert();
+    let cursor = buffer.iter_at_mark(&insert_mark);
+    let cursor_offset = cursor.offset();
+    let mut scan = cursor;
+
+    while scan.backward_char() {
+        let ch = scan.char();
+        if ch == '/' {
+            let query_start = buffer.iter_at_offset(scan.offset() + 1);
+            let query = buffer.text(&query_start, &buffer.iter_at_offset(cursor_offset), true);
+            return Some((scan.offset(), cursor_offset, query.to_string()));
+        }
+        if ch.is_whitespace() {
+            break;
+        }
+    }
+
+    None
+}
+
+fn position_command_menu(text_view: &TextView, menu_box: &GtkBox) {
+    let buffer = text_view.buffer();
+    let insert_mark = buffer.get_insert();
+    let iter = buffer.iter_at_mark(&insert_mark);
+    let rect = text_view.iter_location(&iter);
+    let (x, y) = text_view.buffer_to_window_coords(
+        TextWindowType::Widget,
+        rect.x(),
+        rect.y() + rect.height(),
+    );
+    menu_box.set_margin_start((x + 8).max(8));
+    menu_box.set_margin_top((y + 8).max(8));
+}
+
+fn populate_command_list(list: &ListBox, titles: &[String]) {
+    clear_listbox(list);
+    for title in titles {
+        let row = ListBoxRow::new();
+        row.set_selectable(true);
+        row.set_activatable(true);
+        let item = Label::new(Some(title));
+        item.set_halign(Align::Start);
+        item.set_margin_top(4);
+        item.set_margin_bottom(4);
+        item.set_margin_start(8);
+        item.set_margin_end(8);
+        row.set_child(Some(&item));
+        list.append(&row);
+    }
+}
+
+fn hide_command_menu(menu_box: &GtkBox, menu_state: &Rc<RefCell<CommandMenuState>>) {
+    menu_box.set_visible(false);
+    let mut st = menu_state.borrow_mut();
+    st.visible = false;
+    st.slash_offset = None;
+    st.replace_end_offset = None;
+    st.items.clear();
 }
 
 fn repopulate_notes_list(ui: &UiRefs, state: &Rc<RefCell<AppState>>) {
@@ -530,9 +627,35 @@ fn build_ui(app: &Application) {
         .hexpand(true)
         .build();
     editor_scroller.set_child(Some(&editor));
+    let editor_overlay = Overlay::new();
+    editor_overlay.set_child(Some(&editor_scroller));
+
+    let command_menu_box = GtkBox::new(Orientation::Vertical, 0);
+    command_menu_box.set_halign(Align::Start);
+    command_menu_box.set_valign(Align::Start);
+    command_menu_box.set_margin_top(10);
+    command_menu_box.set_margin_start(8);
+    command_menu_box.set_margin_end(8);
+    command_menu_box.add_css_class("card");
+    command_menu_box.set_size_request(320, -1);
+    command_menu_box.set_visible(false);
+
+    let command_menu_list = ListBox::new();
+    command_menu_list.set_selection_mode(SelectionMode::Single);
+    command_menu_list.set_activate_on_single_click(true);
+
+    let command_menu_scroller = ScrolledWindow::builder()
+        .hscrollbar_policy(PolicyType::Never)
+        .vscrollbar_policy(PolicyType::Automatic)
+        .min_content_height(70)
+        .max_content_height(240)
+        .build();
+    command_menu_scroller.set_child(Some(&command_menu_list));
+    command_menu_box.append(&command_menu_scroller);
+    editor_overlay.add_overlay(&command_menu_box);
 
     split_view.set_sidebar(Some(&sidebar));
-    split_view.set_content(Some(&editor_scroller));
+    split_view.set_content(Some(&editor_overlay));
     toolbar_view.add_top_bar(&header);
     toolbar_view.set_content(Some(&split_view));
     window.set_content(Some(&toolbar_view));
@@ -552,17 +675,21 @@ fn build_ui(app: &Application) {
         settings: initial_settings.clone(),
         ..Default::default()
     }));
+    let command_menu_state = Rc::new(RefCell::new(CommandMenuState::default()));
 
     repopulate_notes_list(&ui, &state);
 
     {
         let ui = ui.clone();
         let state = state.clone();
+        let command_menu_box = command_menu_box.clone();
+        let command_menu_state = command_menu_state.clone();
         notes_list.connect_row_selected(move |_list, row| {
             if let Some(row) = row {
                 if state.borrow().dirty {
                     save_current_note(&ui, &state);
                 }
+                hide_command_menu(&command_menu_box, &command_menu_state);
                 let path_text = row.widget_name().to_string();
                 load_note_into_editor(Path::new(&path_text), &ui, &state);
             }
@@ -572,10 +699,13 @@ fn build_ui(app: &Application) {
     {
         let ui = ui.clone();
         let state = state.clone();
+        let command_menu_box = command_menu_box.clone();
+        let command_menu_state = command_menu_state.clone();
         new_btn.connect_clicked(move |_| {
             if state.borrow().dirty {
                 save_current_note(&ui, &state);
             }
+            hide_command_menu(&command_menu_box, &command_menu_state);
             create_new_note(&ui, &state);
         });
     }
@@ -599,13 +729,129 @@ fn build_ui(app: &Application) {
 
     {
         let state = state.clone();
+        let editor_buffer = editor_buffer.clone();
+        let query_buffer = editor_buffer.clone();
+        let editor = editor.clone();
+        let command_menu_box = command_menu_box.clone();
+        let command_menu_list = command_menu_list.clone();
+        let command_menu_state = command_menu_state.clone();
         editor_buffer.connect_changed(move |_| {
+            if command_menu_state.borrow().suppress_change {
+                return;
+            }
+
             let mut st = state.borrow_mut();
             if st.loading_note {
+                drop(st);
+                hide_command_menu(&command_menu_box, &command_menu_state);
                 return;
             }
             st.dirty = true;
+            drop(st);
+
+            if let Some((slash_offset, replace_end_offset, query)) = slash_query_at_cursor(&query_buffer) {
+                if query.chars().any(|ch| ch.is_whitespace()) {
+                    hide_command_menu(&command_menu_box, &command_menu_state);
+                    return;
+                }
+
+                let query = query.to_lowercase();
+                let titles = linkable_note_titles(&state)
+                    .into_iter()
+                    .filter(|title| title.to_lowercase().contains(&query))
+                    .collect::<Vec<_>>();
+                if titles.is_empty() {
+                    hide_command_menu(&command_menu_box, &command_menu_state);
+                    return;
+                }
+
+                populate_command_list(&command_menu_list, &titles);
+                position_command_menu(&editor, &command_menu_box);
+                command_menu_box.set_visible(true);
+                if let Some(first_row) = command_menu_list.row_at_index(0) {
+                    command_menu_list.select_row(Some(&first_row));
+                }
+
+                let mut menu_state = command_menu_state.borrow_mut();
+                menu_state.visible = true;
+                menu_state.slash_offset = Some(slash_offset);
+                menu_state.replace_end_offset = Some(replace_end_offset);
+                menu_state.items = titles;
+            } else if command_menu_state.borrow().visible {
+                hide_command_menu(&command_menu_box, &command_menu_state);
+            }
         });
+    }
+
+    {
+        let state = state.clone();
+        let editor_buffer = editor_buffer.clone();
+        let command_menu_box = command_menu_box.clone();
+        let command_menu_state = command_menu_state.clone();
+        command_menu_list.connect_row_activated(move |_list, row| {
+            let row_index = row.index();
+            if row_index < 0 {
+                return;
+            }
+
+            let (title, slash_offset, replace_end_offset) = {
+                let menu_state = command_menu_state.borrow();
+                let title = menu_state.items.get(row_index as usize).cloned();
+                (title, menu_state.slash_offset, menu_state.replace_end_offset)
+            };
+
+            let (Some(title), Some(slash_offset), Some(replace_end_offset)) =
+                (title, slash_offset, replace_end_offset)
+            else {
+                hide_command_menu(&command_menu_box, &command_menu_state);
+                return;
+            };
+
+            {
+                let mut menu_state = command_menu_state.borrow_mut();
+                menu_state.suppress_change = true;
+            }
+
+            let mut slash_start = editor_buffer.iter_at_offset(slash_offset);
+            let mut slash_end = editor_buffer.iter_at_offset(replace_end_offset);
+            editor_buffer.delete(&mut slash_start, &mut slash_end);
+            editor_buffer.insert_at_cursor(&format!("[[{title}]]"));
+
+            {
+                let mut menu_state = command_menu_state.borrow_mut();
+                menu_state.suppress_change = false;
+            }
+
+            state.borrow_mut().dirty = true;
+            hide_command_menu(&command_menu_box, &command_menu_state);
+        });
+    }
+
+    {
+        let command_menu_list = command_menu_list.clone();
+        let command_menu_state = command_menu_state.clone();
+        let key_controller = EventControllerKey::new();
+        key_controller.connect_key_pressed(move |_controller, key, _code, _state| {
+            if !command_menu_state.borrow().visible {
+                return glib::Propagation::Proceed;
+            }
+
+            if key == gtk::gdk::Key::Return || key == gtk::gdk::Key::KP_Enter {
+                if command_menu_list.selected_row().is_none()
+                    && let Some(first) = command_menu_list.row_at_index(0)
+                {
+                    command_menu_list.select_row(Some(&first));
+                }
+                if let Some(row) = command_menu_list.selected_row() {
+                    command_menu_list.select_row(Some(&row));
+                    command_menu_list.emit_activate_cursor_row();
+                    return glib::Propagation::Stop;
+                }
+            }
+
+            glib::Propagation::Proceed
+        });
+        editor.add_controller(key_controller);
     }
 
     {
