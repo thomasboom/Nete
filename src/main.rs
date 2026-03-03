@@ -4,13 +4,16 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use adw::prelude::*;
-use adw::{Application, ApplicationWindow, ColorScheme, HeaderBar, StyleManager};
+use adw::{
+    ActionRow, Application, ApplicationWindow, Clamp, ColorScheme, ComboRow, HeaderBar,
+    OverlaySplitView, PreferencesGroup, PreferencesPage, PreferencesWindow, StyleManager,
+    ToolbarView,
+};
 use chrono::Local;
 use gtk::glib;
 use gtk::{
-    Align, Box as GtkBox, Button, ComboBoxText, Dialog, Entry, FileChooserAction,
-    FileChooserNative, Label, ListBox, ListBoxRow, Orientation, Overlay, PolicyType, Revealer,
-    ScrolledWindow, SelectionMode, TextBuffer, TextView,
+    Align, Box as GtkBox, Button, FileChooserAction, FileChooserNative, Label, ListBox, ListBoxRow,
+    Orientation, PolicyType, ScrolledWindow, SelectionMode, StringList, TextBuffer, TextView,
 };
 use serde::{Deserialize, Serialize};
 
@@ -23,17 +26,17 @@ enum Language {
 }
 
 impl Language {
-    fn from_id(id: Option<glib::GString>) -> Self {
-        match id.as_deref() {
-            Some("nl") => Self::Dutch,
+    fn from_selected(index: u32) -> Self {
+        match index {
+            1 => Self::Dutch,
             _ => Self::English,
         }
     }
 
-    fn id(self) -> &'static str {
+    fn selected(self) -> u32 {
         match self {
-            Self::English => "en",
-            Self::Dutch => "nl",
+            Self::English => 0,
+            Self::Dutch => 1,
         }
     }
 }
@@ -46,19 +49,19 @@ enum ThemeMode {
 }
 
 impl ThemeMode {
-    fn from_id(id: Option<glib::GString>) -> Self {
-        match id.as_deref() {
-            Some("light") => Self::Light,
-            Some("dark") => Self::Dark,
+    fn from_selected(index: u32) -> Self {
+        match index {
+            1 => Self::Light,
+            2 => Self::Dark,
             _ => Self::System,
         }
     }
 
-    fn id(self) -> &'static str {
+    fn selected(self) -> u32 {
         match self {
-            Self::System => "system",
-            Self::Light => "light",
-            Self::Dark => "dark",
+            Self::System => 0,
+            Self::Light => 1,
+            Self::Dark => 2,
         }
     }
 }
@@ -88,12 +91,11 @@ impl Default for AppSettings {
 struct UiRefs {
     window: ApplicationWindow,
     header_title: Label,
-    sidebar_revealer: Revealer,
+    split_view: OverlaySplitView,
     notes_list: ListBox,
     editor_buffer: TextBuffer,
     new_btn: Button,
-    collapse_btn: Button,
-    expand_btn: Button,
+    sidebar_btn: Button,
     settings_btn: Button,
 }
 
@@ -150,8 +152,7 @@ fn text_for(lang: Language, key: &str) -> &'static str {
     match (lang, key) {
         (Language::English, "title") => "Nete Notes",
         (Language::English, "new_note") => "Create Note",
-        (Language::English, "toggle_sidebar") => "Collapse/Expand Sidebar",
-        (Language::English, "expand_sidebar") => "Expand Sidebar",
+        (Language::English, "toggle_sidebar") => "Toggle Sidebar",
         (Language::English, "settings") => "Settings",
         (Language::English, "settings_title") => "Settings",
         (Language::English, "language") => "Language",
@@ -163,8 +164,7 @@ fn text_for(lang: Language, key: &str) -> &'static str {
         (Language::English, "theme_dark") => "Dark",
         (Language::Dutch, "title") => "Nete Notities",
         (Language::Dutch, "new_note") => "Notitie Maken",
-        (Language::Dutch, "toggle_sidebar") => "Zijbalk In-/Uitklappen",
-        (Language::Dutch, "expand_sidebar") => "Zijbalk Uitklappen",
+        (Language::Dutch, "toggle_sidebar") => "Zijbalk Tonen/Verbergen",
         (Language::Dutch, "settings") => "Instellingen",
         (Language::Dutch, "settings_title") => "Instellingen",
         (Language::Dutch, "language") => "Taal",
@@ -183,10 +183,8 @@ fn update_translations(ui: &UiRefs, language: Language) {
     ui.header_title.set_text(text_for(language, "title"));
     ui.new_btn
         .set_tooltip_text(Some(text_for(language, "new_note")));
-    ui.collapse_btn
+    ui.sidebar_btn
         .set_tooltip_text(Some(text_for(language, "toggle_sidebar")));
-    ui.expand_btn
-        .set_tooltip_text(Some(text_for(language, "expand_sidebar")));
     ui.settings_btn
         .set_tooltip_text(Some(text_for(language, "settings")));
 }
@@ -304,92 +302,94 @@ fn create_new_note(ui: &UiRefs, state: &Rc<RefCell<AppState>>) {
     }
 }
 
-fn build_settings_dialog(ui: &UiRefs, state: &Rc<RefCell<AppState>>) -> Dialog {
+fn build_settings_window(ui: &UiRefs, state: &Rc<RefCell<AppState>>) -> PreferencesWindow {
     let st = state.borrow();
-    let dialog = Dialog::builder()
+    let settings_window = PreferencesWindow::builder()
         .transient_for(&ui.window)
         .modal(true)
         .title(text_for(st.settings.language, "settings_title"))
-        .default_width(520)
-        .default_height(220)
+        .default_width(620)
+        .default_height(420)
+        .search_enabled(false)
         .build();
-    drop(st);
-
-    let content = dialog.content_area();
-    let wrapper = GtkBox::new(Orientation::Vertical, 12);
-    wrapper.set_margin_start(16);
-    wrapper.set_margin_end(16);
-    wrapper.set_margin_top(16);
-    wrapper.set_margin_bottom(16);
-
-    let st = state.borrow();
     let lang = st.settings.language;
     let theme = st.settings.theme;
     let notes_dir = st.settings.notes_dir.to_string_lossy().to_string();
     drop(st);
 
-    let lang_row = GtkBox::new(Orientation::Horizontal, 8);
-    let lang_label = Label::new(Some(text_for(lang, "language")));
-    lang_label.set_width_chars(14);
-    lang_label.set_halign(Align::Start);
-    lang_label.set_xalign(0.0);
-    let lang_combo = ComboBoxText::new();
-    lang_combo.append(Some("en"), "English");
-    lang_combo.append(Some("nl"), "Nederlands");
-    lang_combo.set_active_id(Some(lang.id()));
-    lang_row.append(&lang_label);
-    lang_row.append(&lang_combo);
+    let page = PreferencesPage::new();
+    let group = PreferencesGroup::new();
+    group.set_title(text_for(lang, "settings_title"));
 
-    let theme_row = GtkBox::new(Orientation::Horizontal, 8);
-    let theme_label = Label::new(Some(text_for(lang, "theme")));
-    theme_label.set_width_chars(14);
-    theme_label.set_halign(Align::Start);
-    theme_label.set_xalign(0.0);
-    let theme_combo = ComboBoxText::new();
-    theme_combo.append(Some("system"), text_for(lang, "theme_system"));
-    theme_combo.append(Some("light"), text_for(lang, "theme_light"));
-    theme_combo.append(Some("dark"), text_for(lang, "theme_dark"));
-    theme_combo.set_active_id(Some(theme.id()));
-    theme_row.append(&theme_label);
-    theme_row.append(&theme_combo);
+    let lang_model = StringList::new(&["English", "Nederlands"]);
+    let lang_row = ComboRow::builder()
+        .title(text_for(lang, "language"))
+        .selected(lang.selected())
+        .build();
+    lang_row.set_model(Some(&lang_model));
 
-    let path_row = GtkBox::new(Orientation::Horizontal, 8);
-    let path_label = Label::new(Some(text_for(lang, "notes_path")));
-    path_label.set_width_chars(14);
-    path_label.set_halign(Align::Start);
-    path_label.set_xalign(0.0);
-    let path_entry = Entry::new();
-    path_entry.set_hexpand(true);
-    path_entry.set_editable(false);
-    path_entry.set_text(&notes_dir);
+    let theme_model = StringList::new(&[
+        text_for(lang, "theme_system"),
+        text_for(lang, "theme_light"),
+        text_for(lang, "theme_dark"),
+    ]);
+    let theme_row = ComboRow::builder()
+        .title(text_for(lang, "theme"))
+        .selected(theme.selected())
+        .build();
+    theme_row.set_model(Some(&theme_model));
+
+    let path_row = ActionRow::builder()
+        .title(text_for(lang, "notes_path"))
+        .subtitle(&notes_dir)
+        .activatable(false)
+        .build();
     let choose_btn = Button::with_label(text_for(lang, "choose_path"));
-    path_row.append(&path_label);
-    path_row.append(&path_entry);
-    path_row.append(&choose_btn);
+    choose_btn.add_css_class("flat");
+    path_row.add_suffix(&choose_btn);
+    path_row.set_activatable_widget(Some(&choose_btn));
 
-    wrapper.append(&lang_row);
-    wrapper.append(&theme_row);
-    wrapper.append(&path_row);
-    content.append(&wrapper);
+    group.add(&lang_row);
+    group.add(&theme_row);
+    group.add(&path_row);
+    page.add(&group);
+    settings_window.add(&page);
 
     {
         let state = state.clone();
         let ui = ui.clone();
-        let dialog_ref = dialog.clone();
-        lang_combo.connect_changed(move |combo| {
-            let mut st = state.borrow_mut();
-            st.settings.language = Language::from_id(combo.active_id());
-            save_settings(&st.settings);
-            update_translations(&ui, st.settings.language);
-            dialog_ref.set_title(Some(text_for(st.settings.language, "settings_title")));
+        let settings_window = settings_window.clone();
+        let theme_row = theme_row.clone();
+        let path_row = path_row.clone();
+        let choose_btn = choose_btn.clone();
+        lang_row.connect_selected_notify(move |row| {
+            let (language, theme_selected) = {
+                let mut st = state.borrow_mut();
+                st.settings.language = Language::from_selected(row.selected());
+                save_settings(&st.settings);
+                (st.settings.language, st.settings.theme.selected())
+            };
+
+            update_translations(&ui, language);
+            settings_window.set_title(Some(text_for(language, "settings_title")));
+            let theme_model = StringList::new(&[
+                text_for(language, "theme_system"),
+                text_for(language, "theme_light"),
+                text_for(language, "theme_dark"),
+            ]);
+            theme_row.set_model(Some(&theme_model));
+            theme_row.set_selected(theme_selected);
+            theme_row.set_title(text_for(language, "theme"));
+            path_row.set_title(text_for(language, "notes_path"));
+            choose_btn.set_label(text_for(language, "choose_path"));
         });
     }
 
     {
         let state = state.clone();
-        theme_combo.connect_changed(move |combo| {
+        theme_row.connect_selected_notify(move |row| {
             let mut st = state.borrow_mut();
-            st.settings.theme = ThemeMode::from_id(combo.active_id());
+            st.settings.theme = ThemeMode::from_selected(row.selected());
             apply_theme(st.settings.theme);
             save_settings(&st.settings);
         });
@@ -398,19 +398,19 @@ fn build_settings_dialog(ui: &UiRefs, state: &Rc<RefCell<AppState>>) -> Dialog {
     {
         let state = state.clone();
         let ui = ui.clone();
-        let path_entry = path_entry.clone();
-        let dialog_parent = dialog.clone();
+        let path_row = path_row.clone();
+        let settings_window = settings_window.clone();
         choose_btn.connect_clicked(move |_| {
             let chooser = FileChooserNative::builder()
                 .title("Choose Notes Folder")
-                .transient_for(&dialog_parent)
+                .transient_for(&settings_window)
                 .action(FileChooserAction::SelectFolder)
                 .accept_label("Select")
                 .cancel_label("Cancel")
                 .build();
             let state = state.clone();
             let ui = ui.clone();
-            let path_entry = path_entry.clone();
+            let path_row = path_row.clone();
             chooser.connect_response(move |dialog, response| {
                 if response == gtk::ResponseType::Accept
                     && let Some(file) = dialog.file()
@@ -422,7 +422,7 @@ fn build_settings_dialog(ui: &UiRefs, state: &Rc<RefCell<AppState>>) -> Dialog {
                         save_settings(&st.settings);
                     }
                     ensure_notes_dir(&path);
-                    path_entry.set_text(path.to_string_lossy().as_ref());
+                    path_row.set_subtitle(path.to_string_lossy().as_ref());
                     repopulate_notes_list(&ui, &state);
                 }
                 dialog.destroy();
@@ -431,7 +431,7 @@ fn build_settings_dialog(ui: &UiRefs, state: &Rc<RefCell<AppState>>) -> Dialog {
         });
     }
 
-    dialog
+    settings_window
 }
 
 fn build_ui(app: &Application) {
@@ -452,44 +452,41 @@ fn build_ui(app: &Application) {
     title.add_css_class("title-3");
     header.set_title_widget(Some(&title));
 
-    let shell = GtkBox::new(Orientation::Vertical, 0);
-    shell.append(&header);
-
-    let root = GtkBox::new(Orientation::Horizontal, 0);
-    root.set_margin_start(8);
-    root.set_margin_end(8);
-    root.set_margin_top(8);
-    root.set_margin_bottom(8);
-    root.add_css_class("view");
-
-    let sidebar_revealer = Revealer::new();
-    sidebar_revealer.set_reveal_child(true);
-    sidebar_revealer.set_transition_duration(200);
+    let toolbar_view = ToolbarView::new();
+    let split_view = OverlaySplitView::new();
+    split_view.set_show_sidebar(true);
+    split_view.set_pin_sidebar(true);
+    split_view.set_sidebar_width_fraction(0.24);
+    split_view.set_min_sidebar_width(220.0);
+    split_view.set_max_sidebar_width(320.0);
+    split_view.set_hexpand(true);
+    split_view.set_vexpand(true);
 
     let sidebar = GtkBox::new(Orientation::Vertical, 8);
     sidebar.set_margin_start(8);
     sidebar.set_margin_end(8);
     sidebar.set_margin_top(8);
     sidebar.set_margin_bottom(8);
-    sidebar.set_width_request(260);
     sidebar.add_css_class("navigation-sidebar");
 
-    let sidebar_top = GtkBox::new(Orientation::Horizontal, 8);
     let new_btn = Button::builder()
         .icon_name("document-new-symbolic")
         .tooltip_text(text_for(initial_settings.language, "new_note"))
         .build();
-    let collapse_btn = Button::builder()
-        .icon_name("sidebar-show-right-symbolic")
+    new_btn.add_css_class("flat");
+    let sidebar_btn = Button::builder()
+        .icon_name("sidebar-show-symbolic")
         .tooltip_text(text_for(initial_settings.language, "toggle_sidebar"))
         .build();
+    sidebar_btn.add_css_class("flat");
     let settings_btn = Button::builder()
         .icon_name("emblem-system-symbolic")
         .tooltip_text(text_for(initial_settings.language, "settings"))
         .build();
-    sidebar_top.append(&new_btn);
-    sidebar_top.append(&collapse_btn);
-    sidebar_top.append(&settings_btn);
+    settings_btn.add_css_class("flat");
+    header.pack_start(&sidebar_btn);
+    header.pack_end(&settings_btn);
+    header.pack_end(&new_btn);
 
     let notes_list = ListBox::new();
     notes_list.set_selection_mode(SelectionMode::Single);
@@ -501,9 +498,7 @@ fn build_ui(app: &Application) {
         .build();
     notes_scroller.set_child(Some(&notes_list));
 
-    sidebar.append(&sidebar_top);
     sidebar.append(&notes_scroller);
-    sidebar_revealer.set_child(Some(&sidebar));
 
     let editor_buffer = TextBuffer::new(None::<&gtk::TextTagTable>);
     let editor = TextView::builder()
@@ -525,36 +520,26 @@ fn build_ui(app: &Application) {
     editor_scroller.set_margin_top(8);
     editor_scroller.set_margin_bottom(8);
     editor_scroller.set_child(Some(&editor));
-
-    let overlay = Overlay::new();
-    overlay.set_child(Some(&editor_scroller));
-
-    let expand_btn = Button::builder()
-        .icon_name("sidebar-show-left-symbolic")
-        .tooltip_text(text_for(initial_settings.language, "expand_sidebar"))
-        .halign(Align::Start)
-        .valign(Align::Start)
-        .margin_start(16)
-        .margin_top(16)
-        .css_classes(["circular"])
-        .visible(false)
+    let editor_clamp = Clamp::builder()
+        .maximum_size(1200)
+        .tightening_threshold(600)
+        .child(&editor_scroller)
         .build();
-    overlay.add_overlay(&expand_btn);
 
-    root.append(&sidebar_revealer);
-    root.append(&overlay);
-    shell.append(&root);
-    window.set_content(Some(&shell));
+    split_view.set_sidebar(Some(&sidebar));
+    split_view.set_content(Some(&editor_clamp));
+    toolbar_view.add_top_bar(&header);
+    toolbar_view.set_content(Some(&split_view));
+    window.set_content(Some(&toolbar_view));
 
     let ui = UiRefs {
         window: window.clone(),
         header_title: title.clone(),
-        sidebar_revealer: sidebar_revealer.clone(),
+        split_view: split_view.clone(),
         notes_list: notes_list.clone(),
         editor_buffer: editor_buffer.clone(),
         new_btn: new_btn.clone(),
-        collapse_btn: collapse_btn.clone(),
-        expand_btn: expand_btn.clone(),
+        sidebar_btn: sidebar_btn.clone(),
         settings_btn: settings_btn.clone(),
     };
 
@@ -592,18 +577,9 @@ fn build_ui(app: &Application) {
 
     {
         let ui = ui.clone();
-        collapse_btn.connect_clicked(move |_| {
-            let visible = ui.sidebar_revealer.reveals_child();
-            ui.sidebar_revealer.set_reveal_child(!visible);
-            ui.expand_btn.set_visible(visible);
-        });
-    }
-
-    {
-        let ui = ui.clone();
-        expand_btn.connect_clicked(move |_| {
-            ui.sidebar_revealer.set_reveal_child(true);
-            ui.expand_btn.set_visible(false);
+        sidebar_btn.connect_clicked(move |_| {
+            let shown = ui.split_view.shows_sidebar();
+            ui.split_view.set_show_sidebar(!shown);
         });
     }
 
@@ -611,12 +587,8 @@ fn build_ui(app: &Application) {
         let ui = ui.clone();
         let state = state.clone();
         settings_btn.connect_clicked(move |_| {
-            let dialog = build_settings_dialog(&ui, &state);
-            dialog.connect_close_request(|d| {
-                d.hide();
-                glib::Propagation::Stop
-            });
-            dialog.show();
+            let settings_window = build_settings_window(&ui, &state);
+            settings_window.present();
         });
     }
 
