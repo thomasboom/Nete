@@ -14,6 +14,7 @@ pub struct Note {
 pub struct NoteSummary {
     pub id: i64,
     pub title: String,
+    pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -54,4 +55,3 @@ pub struct PluginCommand {
     pub title: String,
     pub snippet: String,
 }
-

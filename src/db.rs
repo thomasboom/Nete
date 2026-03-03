@@ -104,15 +104,20 @@ impl Database {
     pub fn list_notes(&self) -> AppResult<Vec<NoteSummary>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, title, updated_at FROM notes ORDER BY updated_at DESC")?;
+            .prepare("SELECT id, title, created_at, updated_at FROM notes ORDER BY updated_at DESC")?;
         let rows = stmt.query_map([], |row| {
-            let updated_raw: String = row.get(2)?;
+            let created_raw: String = row.get(2)?;
+            let updated_raw: String = row.get(3)?;
+            let created_at = DateTime::parse_from_rfc3339(&created_raw)
+                .map(|dt| dt.with_timezone(&Utc))
+                .unwrap_or_else(|_| Utc::now());
             let updated_at = DateTime::parse_from_rfc3339(&updated_raw)
                 .map(|dt| dt.with_timezone(&Utc))
                 .unwrap_or_else(|_| Utc::now());
             Ok(NoteSummary {
                 id: row.get(0)?,
                 title: row.get(1)?,
+                created_at,
                 updated_at,
             })
         })?;
@@ -213,20 +218,25 @@ impl Database {
 
     pub fn backlinks_to(&self, note_id: i64) -> AppResult<Vec<NoteSummary>> {
         let mut stmt = self.conn.prepare(
-            "SELECT n.id, n.title, n.updated_at
+            "SELECT n.id, n.title, n.created_at, n.updated_at
              FROM notes n
              INNER JOIN backlinks b ON b.source_note_id = n.id
              WHERE b.target_note_id = ?1
              ORDER BY n.updated_at DESC",
         )?;
         let rows = stmt.query_map(params![note_id], |row| {
-            let updated_raw: String = row.get(2)?;
+            let created_raw: String = row.get(2)?;
+            let updated_raw: String = row.get(3)?;
+            let created_at = DateTime::parse_from_rfc3339(&created_raw)
+                .map(|dt| dt.with_timezone(&Utc))
+                .unwrap_or_else(|_| Utc::now());
             let updated_at = DateTime::parse_from_rfc3339(&updated_raw)
                 .map(|dt| dt.with_timezone(&Utc))
                 .unwrap_or_else(|_| Utc::now());
             Ok(NoteSummary {
                 id: row.get(0)?,
                 title: row.get(1)?,
+                created_at,
                 updated_at,
             })
         })?;
@@ -400,4 +410,3 @@ fn extract_wikilinks(input: &str) -> Vec<String> {
     }
     links
 }
-

@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use chrono::Local;
 use eframe::egui;
 use egui::text::{LayoutJob, TextFormat};
 
@@ -21,6 +22,7 @@ struct Runtime {
     note_service: NoteService,
     sidebar_collapsed: bool,
     show_settings: bool,
+    plain_text_mode: bool,
     settings_notice: Option<String>,
     last_autosave: Instant,
 }
@@ -72,6 +74,7 @@ impl NeteApp {
             note_service,
             sidebar_collapsed: false,
             show_settings: false,
+            plain_text_mode: false,
             settings_notice: None,
             last_autosave: Instant::now(),
         })
@@ -81,32 +84,32 @@ impl NeteApp {
 fn markdown_live_layout_job(ui: &egui::Ui, string: &str, wrap_width: f32) -> LayoutJob {
     let mut job = LayoutJob::default();
     let body_color = ui.visuals().text_color();
-    let muted = egui::Color32::from_rgb(148, 154, 168);
-    let accent = egui::Color32::from_rgb(224, 194, 142);
+    let muted = egui::Color32::from_rgb(132, 139, 154);
+    let accent = egui::Color32::from_rgb(172, 191, 222);
 
     for segment in string.split_inclusive('\n') {
         let trimmed = segment.trim_start();
         let format = if trimmed.starts_with("#### ") {
             TextFormat {
-                font_id: egui::FontId::proportional(19.0),
+                font_id: egui::FontId::proportional(20.0),
                 color: body_color,
                 ..Default::default()
             }
         } else if trimmed.starts_with("### ") {
             TextFormat {
-                font_id: egui::FontId::proportional(22.0),
+                font_id: egui::FontId::proportional(23.0),
                 color: body_color,
                 ..Default::default()
             }
         } else if trimmed.starts_with("## ") {
             TextFormat {
-                font_id: egui::FontId::proportional(26.0),
+                font_id: egui::FontId::proportional(27.0),
                 color: body_color,
                 ..Default::default()
             }
         } else if trimmed.starts_with("# ") {
             TextFormat {
-                font_id: egui::FontId::proportional(31.0),
+                font_id: egui::FontId::proportional(32.0),
                 color: accent,
                 ..Default::default()
             }
@@ -141,6 +144,10 @@ fn markdown_live_layout_job(ui: &egui::Ui, string: &str, wrap_width: f32) -> Lay
 
     job.wrap.max_width = wrap_width;
     job
+}
+
+fn format_note_timestamp(dt: chrono::DateTime<chrono::Utc>) -> String {
+    dt.with_timezone(&Local).format("%d %b %H:%M").to_string()
 }
 
 impl Runtime {
@@ -213,36 +220,46 @@ impl Runtime {
 
     fn ui_sidebar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            let collapse_text = if self.sidebar_collapsed { "⟩" } else { "⟨" };
-            if ui.button(collapse_text).clicked() {
-                self.sidebar_collapsed = !self.sidebar_collapsed;
+            if ui
+                .add_sized([28.0, 28.0], egui::Button::new(egui::RichText::new("S").size(13.0)))
+                .clicked()
+            {
+                self.save_current();
+            }
+            if ui
+                .add_sized([28.0, 28.0], egui::Button::new(egui::RichText::new("T").size(13.0)))
+                .clicked()
+            {
+                self.show_settings = true;
             }
 
-            if !self.sidebar_collapsed {
-                ui.label(egui::RichText::new("NETE").size(14.0).strong());
+            let collapse_text = if self.sidebar_collapsed { "›" } else { "‹" };
+            if ui
+                .add_sized(
+                    [28.0, 28.0],
+                    egui::Button::new(egui::RichText::new(collapse_text).size(13.0)),
+                )
+                .clicked()
+            {
+                self.sidebar_collapsed = !self.sidebar_collapsed;
+            }
+            if ui
+                .add_sized([28.0, 28.0], egui::Button::new(egui::RichText::new("+").size(13.0)))
+                .clicked()
+            {
+                self.create_note();
             }
         });
 
         if self.sidebar_collapsed {
-            ui.add_space(10.0);
-            if ui.button("＋").clicked() {
-                self.create_note();
-            }
             return;
         }
 
-        ui.add_space(8.0);
-        if ui
-            .add_sized([ui.available_width(), 32.0], egui::Button::new("＋ New note"))
-            .clicked()
-        {
-            self.create_note();
-        }
-        ui.add_space(6.0);
+        ui.add_space(12.0);
         ui.label(
             egui::RichText::new(format!("{} notes", self.notes.len()))
                 .small()
-                .color(egui::Color32::from_gray(150)),
+                .color(egui::Color32::from_gray(142)),
         );
         ui.separator();
 
@@ -256,38 +273,50 @@ impl Runtime {
                 } else {
                     note.title.as_str()
                 };
-                if ui
-                    .selectable_label(selected, egui::RichText::new(title).size(17.0))
-                    .clicked()
-                {
-                    clicked_id = Some(id);
-                }
+
+                let fill = if selected {
+                    egui::Color32::from_rgb(58, 64, 75)
+                } else {
+                    egui::Color32::from_rgb(33, 35, 38)
+                };
+
+                egui::Frame::none()
+                    .fill(fill)
+                    .rounding(egui::Rounding::same(10.0))
+                    .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+                    .show(ui, |ui| {
+                        let response = ui.add_sized(
+                            [ui.available_width(), 22.0],
+                            egui::SelectableLabel::new(
+                                selected,
+                                egui::RichText::new(title).size(16.5).strong(),
+                            ),
+                        );
+                        if response.clicked() {
+                            clicked_id = Some(id);
+                        }
+
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Created").small().color(egui::Color32::from_gray(154)));
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.label(
+                                        egui::RichText::new(format_note_timestamp(note.created_at))
+                                            .small()
+                                            .color(egui::Color32::from_gray(154)),
+                                    );
+                                },
+                            );
+                        });
+                    });
+                ui.add_space(6.0);
             }
         });
 
         if let Some(id) = clicked_id {
             self.open_note(id);
         }
-    }
-
-    fn ui_top_bar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal_wrapped(|ui| {
-            ui.heading("Editor");
-            ui.add_space(8.0);
-            ui.label(
-                egui::RichText::new("Single-view markdown")
-                    .small()
-                    .color(egui::Color32::from_gray(150)),
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("⚙ Settings").clicked() {
-                    self.show_settings = true;
-                }
-                if ui.button("💾 Save").clicked() {
-                    self.save_current();
-                }
-            });
-        });
     }
 
     fn ui_settings_window(&mut self, ctx: &egui::Context) {
@@ -321,6 +350,10 @@ impl Runtime {
                     .checkbox(&mut self.config.cloud_sync.enabled, "Enable cloud sync")
                     .changed();
 
+                changed |= ui
+                    .checkbox(&mut self.plain_text_mode, "Always show editor as plain text")
+                    .changed();
+
                 if changed {
                     self.save_config();
                 }
@@ -335,54 +368,101 @@ impl Runtime {
     }
 
     fn ui_editor(&mut self, ui: &mut egui::Ui) {
-        self.ui_top_bar(ui);
-        ui.add_space(10.0);
+        ui.add_space(4.0);
 
         let Some(buffer) = self.buffer.as_mut() else {
-            ui.label("No note selected");
+            ui.label(
+                egui::RichText::new("Select or create a page to start writing")
+                    .color(egui::Color32::from_gray(160)),
+            );
             return;
         };
 
-        let title_changed = ui
-            .add(
-                egui::TextEdit::singleline(&mut buffer.title)
-                    .hint_text("Title")
-                    .font(egui::TextStyle::Heading)
-                    .desired_width(f32::INFINITY),
-            )
-            .changed();
-        ui.add_space(8.0);
+        egui::Frame::none()
+            .fill(egui::Color32::from_rgb(27, 28, 31))
+            .rounding(egui::Rounding::same(14.0))
+            .inner_margin(egui::Margin::symmetric(18.0, 16.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Title")
+                            .small()
+                            .color(egui::Color32::from_gray(150)),
+                    );
+                    let title_changed = ui
+                        .add_sized(
+                            [ui.available_width(), 24.0],
+                            egui::TextEdit::singleline(&mut buffer.title)
+                                .hint_text("Untitled")
+                                .font(egui::TextStyle::Body),
+                        )
+                        .changed();
+                    if title_changed {
+                        buffer.dirty = true;
+                    }
+                });
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(10.0);
 
-        let mut layouter = |ui: &egui::Ui, text: &str, wrap_width: f32| {
-            let job = markdown_live_layout_job(ui, text, wrap_width);
-            ui.fonts(|fonts| fonts.layout_job(job))
-        };
+                let mut layouter = |ui: &egui::Ui, text: &str, wrap_width: f32| {
+                    let job = markdown_live_layout_job(ui, text, wrap_width);
+                    ui.fonts(|fonts| fonts.layout_job(job))
+                };
 
-        let editor_changed = ui
-            .add(
-                egui::TextEdit::multiline(&mut buffer.content)
+                let mut editor = egui::TextEdit::multiline(&mut buffer.content)
                     .desired_rows(32)
                     .lock_focus(true)
                     .desired_width(f32::INFINITY)
-                    .layouter(&mut layouter),
-            )
-            .changed();
+                    .frame(false);
+                if !self.plain_text_mode {
+                    editor = editor.layouter(&mut layouter);
+                }
+                let editor_changed = ui.add(editor).changed();
 
-        ui.add_space(6.0);
-        let words = buffer.content.split_whitespace().count();
-        ui.label(
-            egui::RichText::new(format!("{words} words"))
-                .small()
-                .color(egui::Color32::from_gray(150)),
-        );
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(6.0);
+                let words = buffer.content.split_whitespace().count();
+                let save_state = if buffer.dirty { "Unsaved changes" } else { "Synced" };
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!("{words} words"))
+                            .small()
+                            .color(egui::Color32::from_gray(145)),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            egui::RichText::new(save_state)
+                                .small()
+                                .color(egui::Color32::from_gray(145)),
+                        );
+                    });
+                });
 
-        if editor_changed {
-            buffer.dirty = true;
-        }
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Tags")
+                            .small()
+                            .color(egui::Color32::from_gray(150)),
+                    );
+                    let tags_changed = ui
+                        .add_sized(
+                            [ui.available_width(), 24.0],
+                            egui::TextEdit::singleline(&mut buffer.tags)
+                                .hint_text("notes, writing, project"),
+                        )
+                        .changed();
+                    if tags_changed {
+                        buffer.dirty = true;
+                    }
+                });
 
-        if title_changed {
-            buffer.dirty = true;
-        }
+                if editor_changed {
+                    buffer.dirty = true;
+                }
+            });
     }
 }
 
@@ -411,7 +491,7 @@ impl eframe::App for NeteApp {
 
         egui::SidePanel::left("nav")
             .resizable(true)
-            .default_width(if runtime.sidebar_collapsed { 48.0 } else { 280.0 })
+            .default_width(if runtime.sidebar_collapsed { 56.0 } else { 300.0 })
             .show(ctx, |ui| runtime.ui_sidebar(ui));
 
         egui::CentralPanel::default().show(ctx, |ui| runtime.ui_editor(ui));
