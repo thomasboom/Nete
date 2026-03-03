@@ -158,6 +158,9 @@ fn text_for(lang: Language, key: &str) -> &'static str {
         (Language::English, "theme") => "Theme",
         (Language::English, "notes_path") => "Notes Folder",
         (Language::English, "choose_path") => "Choose Folder",
+        (Language::English, "choose_notes_folder") => "Choose Notes Folder",
+        (Language::English, "select") => "Select",
+        (Language::English, "cancel") => "Cancel",
         (Language::English, "theme_system") => "System",
         (Language::English, "theme_light") => "Light",
         (Language::English, "theme_dark") => "Dark",
@@ -170,6 +173,9 @@ fn text_for(lang: Language, key: &str) -> &'static str {
         (Language::Dutch, "theme") => "Thema",
         (Language::Dutch, "notes_path") => "Notitiemap",
         (Language::Dutch, "choose_path") => "Map Kiezen",
+        (Language::Dutch, "choose_notes_folder") => "Notitiemap Kiezen",
+        (Language::Dutch, "select") => "Selecteren",
+        (Language::Dutch, "cancel") => "Annuleren",
         (Language::Dutch, "theme_system") => "Systeem",
         (Language::Dutch, "theme_light") => "Licht",
         (Language::Dutch, "theme_dark") => "Donker",
@@ -377,6 +383,7 @@ fn build_settings_window(ui: &UiRefs, state: &Rc<RefCell<AppState>>) -> Preferen
         let state = state.clone();
         let ui = ui.clone();
         let settings_window = settings_window.clone();
+        let group = group.clone();
         let theme_row = theme_row.clone();
         let path_row = path_row.clone();
         let choose_btn = choose_btn.clone();
@@ -390,6 +397,8 @@ fn build_settings_window(ui: &UiRefs, state: &Rc<RefCell<AppState>>) -> Preferen
 
             update_translations(&ui, language);
             settings_window.set_title(Some(text_for(language, "settings_title")));
+            group.set_title(text_for(language, "settings_title"));
+            row.set_title(text_for(language, "language"));
             let theme_model = StringList::new(&[
                 text_for(language, "theme_system"),
                 text_for(language, "theme_light"),
@@ -419,12 +428,13 @@ fn build_settings_window(ui: &UiRefs, state: &Rc<RefCell<AppState>>) -> Preferen
         let path_row = path_row.clone();
         let settings_window = settings_window.clone();
         choose_btn.connect_clicked(move |_| {
+            let language = state.borrow().settings.language;
             let chooser = FileChooserNative::builder()
-                .title("Choose Notes Folder")
+                .title(text_for(language, "choose_notes_folder"))
                 .transient_for(&settings_window)
                 .action(FileChooserAction::SelectFolder)
-                .accept_label("Select")
-                .cancel_label("Cancel")
+                .accept_label(text_for(language, "select"))
+                .cancel_label(text_for(language, "cancel"))
                 .build();
             let state = state.clone();
             let ui = ui.clone();
