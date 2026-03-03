@@ -1,0 +1,23 @@
+src/main.rs
+  d1d232d134f9fe5d 112,119-130,300-334,370,372,376,396,407,409-410,413-414,428-431,852-853,858,869,882,907
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.7",
+  "base_commit_sha": "9fc000f10d2904a64c32d5df1bda6f2e00442ede",
+  "prompts": {
+    "d1d232d134f9fe5d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019cb439-20a2-7713-8e94-fa73a496c626",
+        "model": "gpt-5.3-codex"
+      },
+      "human_author": "ThomasNow Productions <thomasnowprod@proton.me>",
+      "messages": [],
+      "total_additions": 67,
+      "total_deletions": 21,
+      "accepted_lines": 67,
+      "overriden_lines": 0
+    }
+  }
+}
