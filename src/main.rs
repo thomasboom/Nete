@@ -7,13 +7,13 @@ use adw::prelude::*;
 use adw::{
     ActionRow, Application, ApplicationWindow, Clamp, ColorScheme, ComboRow, HeaderBar,
     OverlaySplitView, PreferencesGroup, PreferencesPage, PreferencesWindow, StyleManager,
-    ToolbarView,
+    ToolbarView, WindowTitle,
 };
 use chrono::Local;
 use gtk::glib;
 use gtk::{
-    Align, Box as GtkBox, Button, FileChooserAction, FileChooserNative, Label, ListBox, ListBoxRow,
-    Orientation, PolicyType, ScrolledWindow, SelectionMode, StringList, TextBuffer, TextView,
+    Box as GtkBox, Button, FileChooserAction, FileChooserNative, ListBox, ListBoxRow, Orientation,
+    PolicyType, ScrolledWindow, SelectionMode, StringList, TextBuffer, TextView,
 };
 use serde::{Deserialize, Serialize};
 
@@ -90,7 +90,7 @@ impl Default for AppSettings {
 #[derive(Clone)]
 struct UiRefs {
     window: ApplicationWindow,
-    header_title: Label,
+    header_title: WindowTitle,
     split_view: OverlaySplitView,
     notes_list: ListBox,
     editor_buffer: TextBuffer,
@@ -180,7 +180,7 @@ fn text_for(lang: Language, key: &str) -> &'static str {
 
 fn update_translations(ui: &UiRefs, language: Language) {
     ui.window.set_title(Some(text_for(language, "title")));
-    ui.header_title.set_text(text_for(language, "title"));
+    ui.header_title.set_title(text_for(language, "title"));
     ui.new_btn
         .set_tooltip_text(Some(text_for(language, "new_note")));
     ui.sidebar_btn
@@ -267,29 +267,12 @@ fn repopulate_notes_list(ui: &UiRefs, state: &Rc<RefCell<AppState>>) {
         row.set_selectable(true);
         row.set_activatable(true);
         row.set_widget_name(path.to_string_lossy().as_ref());
-
-        let card = GtkBox::new(Orientation::Vertical, 4);
-
-        let title_label = Label::new(Some(&title));
-        title_label.set_halign(Align::Start);
-        title_label.set_xalign(0.0);
-        title_label.add_css_class("heading");
-        title_label.set_margin_start(10);
-        title_label.set_margin_end(10);
-        title_label.set_margin_top(10);
-
-        let subtitle_label = Label::new(Some(&subtitle));
-        subtitle_label.set_halign(Align::Start);
-        subtitle_label.set_xalign(0.0);
-        subtitle_label.add_css_class("caption");
-        subtitle_label.add_css_class("dim-label");
-        subtitle_label.set_margin_start(10);
-        subtitle_label.set_margin_end(10);
-        subtitle_label.set_margin_bottom(10);
-
-        card.append(&title_label);
-        card.append(&subtitle_label);
-        row.set_child(Some(&card));
+        let note_row = ActionRow::builder()
+            .title(&title)
+            .subtitle(&subtitle)
+            .activatable(true)
+            .build();
+        row.set_child(Some(&note_row));
         ui.notes_list.append(&row);
     }
 }
@@ -484,8 +467,7 @@ fn build_ui(app: &Application) {
         .build();
 
     let header = HeaderBar::new();
-    let title = Label::new(Some(text_for(initial_settings.language, "title")));
-    title.add_css_class("title-3");
+    let title = WindowTitle::new(text_for(initial_settings.language, "title"), "");
     header.set_title_widget(Some(&title));
 
     let toolbar_view = ToolbarView::new();
@@ -499,10 +481,10 @@ fn build_ui(app: &Application) {
     split_view.set_vexpand(true);
 
     let sidebar = GtkBox::new(Orientation::Vertical, 8);
-    sidebar.set_margin_start(8);
-    sidebar.set_margin_end(8);
-    sidebar.set_margin_top(8);
-    sidebar.set_margin_bottom(8);
+    sidebar.set_margin_start(6);
+    sidebar.set_margin_end(6);
+    sidebar.set_margin_top(6);
+    sidebar.set_margin_bottom(6);
     sidebar.add_css_class("navigation-sidebar");
 
     let new_btn = Button::builder()
@@ -526,9 +508,7 @@ fn build_ui(app: &Application) {
 
     let notes_list = ListBox::new();
     notes_list.set_selection_mode(SelectionMode::Single);
-    notes_list.add_css_class("boxed-list");
-    notes_list.set_margin_top(4);
-    notes_list.set_margin_bottom(4);
+    notes_list.add_css_class("navigation-sidebar");
     let notes_scroller = ScrolledWindow::builder()
         .hscrollbar_policy(PolicyType::Never)
         .min_content_height(200)
@@ -553,10 +533,10 @@ fn build_ui(app: &Application) {
         .hexpand(true)
         .build();
     editor_scroller.add_css_class("card");
-    editor_scroller.set_margin_start(8);
-    editor_scroller.set_margin_end(8);
-    editor_scroller.set_margin_top(8);
-    editor_scroller.set_margin_bottom(8);
+    editor_scroller.set_margin_start(12);
+    editor_scroller.set_margin_end(12);
+    editor_scroller.set_margin_top(12);
+    editor_scroller.set_margin_bottom(12);
     editor_scroller.set_child(Some(&editor));
     let editor_clamp = Clamp::builder()
         .maximum_size(1200)
