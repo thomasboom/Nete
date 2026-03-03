@@ -987,6 +987,7 @@ fn build_ui(app: &Application) {
     let toolbar_view = ToolbarView::new();
     let split_view = OverlaySplitView::new();
     split_view.set_show_sidebar(true);
+    let root_overlay = Overlay::new();
 
     let sidebar = GtkBox::new(Orientation::Vertical, 0);
     sidebar.add_css_class("navigation-sidebar");
@@ -1090,16 +1091,17 @@ fn build_ui(app: &Application) {
     command_input.set_margin_bottom(4);
     command_input.set_visible(true);
 
-    command_palette_box.append(&command_input);
-    command_palette_box.append(&command_palette_scroller);
-    editor_overlay.add_overlay(&command_palette_box);
-    resize_command_palette(&window, &command_palette_box, &command_palette_scroller);
-
     split_view.set_sidebar(Some(&sidebar));
     split_view.set_content(Some(&editor_overlay));
     toolbar_view.add_top_bar(&header);
     toolbar_view.set_content(Some(&split_view));
-    window.set_content(Some(&toolbar_view));
+    root_overlay.set_child(Some(&toolbar_view));
+    command_palette_box.append(&command_input);
+    command_palette_box.append(&command_palette_scroller);
+    root_overlay.add_overlay(&command_palette_box);
+    root_overlay.set_clip_overlay(&command_palette_box, false);
+    resize_command_palette(&window, &command_palette_box, &command_palette_scroller);
+    window.set_content(Some(&root_overlay));
 
     let ui = UiRefs {
         window: window.clone(),
