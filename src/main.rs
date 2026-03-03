@@ -923,6 +923,32 @@ fn build_ui(app: &Application) {
                 return glib::Propagation::Proceed;
             }
 
+            if key == gtk::gdk::Key::Up {
+                let selected_index = command_menu_list
+                    .selected_row()
+                    .map(|r| r.index())
+                    .unwrap_or(0);
+                let next_index = (selected_index - 1).max(0);
+                if let Some(row) = command_menu_list.row_at_index(next_index) {
+                    command_menu_list.select_row(Some(&row));
+                    row.grab_focus();
+                }
+                return glib::Propagation::Stop;
+            }
+
+            if key == gtk::gdk::Key::Down {
+                let selected_index = command_menu_list
+                    .selected_row()
+                    .map(|r| r.index())
+                    .unwrap_or(-1);
+                let next_index = selected_index + 1;
+                if let Some(row) = command_menu_list.row_at_index(next_index) {
+                    command_menu_list.select_row(Some(&row));
+                    row.grab_focus();
+                }
+                return glib::Propagation::Stop;
+            }
+
             if key == gtk::gdk::Key::Return || key == gtk::gdk::Key::KP_Enter {
                 let selected_index = command_menu_list.selected_row().map(|r| r.index()).unwrap_or(0);
                 if insert_command_item_from_index(
