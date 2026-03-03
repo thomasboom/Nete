@@ -1,0 +1,23 @@
+src/main.rs
+  d1d232d134f9fe5d 926-951
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.7",
+  "base_commit_sha": "e99e358109f75ac17d974a41a892c635ddda4fdb",
+  "prompts": {
+    "d1d232d134f9fe5d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019cb439-20a2-7713-8e94-fa73a496c626",
+        "model": "gpt-5.3-codex"
+      },
+      "human_author": "ThomasNow Productions <thomasnowprod@proton.me>",
+      "messages": [],
+      "total_additions": 26,
+      "total_deletions": 0,
+      "accepted_lines": 26,
+      "overriden_lines": 0
+    }
+  }
+}
