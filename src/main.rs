@@ -126,6 +126,7 @@ struct CommandPaletteState {
 enum CommandMenuAction {
     NoteLink(String),
     InsertText(String),
+    NoOp,
     OpenNote(PathBuf),
     CreateNote,
     ToggleSidebar,
@@ -140,6 +141,7 @@ impl CommandMenuAction {
         match self {
             Self::NoteLink(_) => "text-x-generic-symbolic",
             Self::InsertText(_) => "applications-engineering-symbolic",
+            Self::NoOp => "dialog-warning-symbolic",
             Self::OpenNote(_) => "text-x-generic-symbolic",
             Self::CreateNote => "document-new-symbolic",
             Self::ToggleSidebar => "sidebar-show-symbolic",
@@ -479,6 +481,12 @@ fn command_bar_items(state: &Rc<RefCell<AppState>>, query: &str) -> Vec<CommandM
     }
 
     items.extend(note_items);
+    if items.is_empty() {
+        items.push(CommandMenuItem {
+            label: format!("No results for \"{}\"", query.trim()),
+            action: CommandMenuAction::NoOp,
+        });
+    }
     items
 }
 
@@ -560,6 +568,31 @@ fn hide_command_palette(menu_box: &GtkBox, menu_state: &Rc<RefCell<CommandPalett
     let mut st = menu_state.borrow_mut();
     st.visible = false;
     st.items.clear();
+}
+
+fn resize_command_palette(
+    window: &ApplicationWindow,
+    palette_box: &GtkBox,
+    palette_scroller: &ScrolledWindow,
+) {
+    let width = if window.allocated_width() > 0 {
+        window.allocated_width()
+    } else {
+        window.default_width()
+    };
+    let height = if window.allocated_height() > 0 {
+        window.allocated_height()
+    } else {
+        window.default_height()
+    };
+
+    let palette_width = (width - 48).clamp(420, 1280);
+    let max_list_height = (height - 180).clamp(220, 760);
+    let min_list_height = (max_list_height / 2).clamp(160, 340);
+
+    palette_box.set_size_request(palette_width, -1);
+    palette_scroller.set_max_content_height(max_list_height);
+    palette_scroller.set_min_content_height(min_list_height);
 }
 
 fn choose_notes_folder<W: IsA<gtk::Window>>(
@@ -667,6 +700,7 @@ fn execute_command_item_from_index(
             ui.editor_buffer.insert_at_cursor(&text);
             app_state.borrow_mut().dirty = true;
         }
+        CommandMenuAction::NoOp => return false,
         CommandMenuAction::NoteLink(title) => {
             ui.editor_buffer.insert_at_cursor(&format!("[[{title}]]"));
             app_state.borrow_mut().dirty = true;
@@ -1059,6 +1093,7 @@ fn build_ui(app: &Application) {
     command_palette_box.append(&command_input);
     command_palette_box.append(&command_palette_scroller);
     editor_overlay.add_overlay(&command_palette_box);
+    resize_command_palette(&window, &command_palette_box, &command_palette_scroller);
 
     split_view.set_sidebar(Some(&sidebar));
     split_view.set_content(Some(&editor_overlay));
@@ -1424,9 +1459,11 @@ fn build_ui(app: &Application) {
         let command_input = command_input.clone();
         let command_palette_box = command_palette_box.clone();
         let command_palette_list = command_palette_list.clone();
+        let command_palette_scroller = command_palette_scroller.clone();
         let command_palette_state = command_palette_state.clone();
         let slash_menu_box = slash_menu_box.clone();
         let slash_menu_state = slash_menu_state.clone();
+        let window_for_resize = window.clone();
         let window_key_controller = EventControllerKey::new();
         window_key_controller.set_propagation_phase(gtk::PropagationPhase::Capture);
         window_key_controller.connect_key_pressed(move |_controller, key, _code, mods| {
@@ -1440,10 +1477,12 @@ fn build_ui(app: &Application) {
 
                 hide_slash_menu(&slash_menu_box, &slash_menu_state);
                 let items = command_bar_items(&state, "");
-                if items.is_empty() {
-                    return glib::Propagation::Stop;
-                }
                 populate_command_list(&command_palette_list, &items);
+                resize_command_palette(
+                    &window_for_resize,
+                    &command_palette_box,
+                    &command_palette_scroller,
+                );
                 command_input.set_text("");
                 command_palette_box.set_visible(true);
                 if let Some(first_row) = command_palette_list.row_at_index(0) {
@@ -1469,6 +1508,22 @@ fn build_ui(app: &Application) {
             glib::Propagation::Proceed
         });
         window.add_controller(window_key_controller);
+    }
+
+    {
+        let command_palette_box = command_palette_box.clone();
+        let command_palette_scroller = command_palette_scroller.clone();
+        window.connect_notify_local(Some("default-width"), move |win, _| {
+            resize_command_palette(win, &command_palette_box, &command_palette_scroller);
+        });
+    }
+
+    {
+        let command_palette_box = command_palette_box.clone();
+        let command_palette_scroller = command_palette_scroller.clone();
+        window.connect_notify_local(Some("default-height"), move |win, _| {
+            resize_command_palette(win, &command_palette_box, &command_palette_scroller);
+        });
     }
 
     {
