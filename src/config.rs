@@ -31,6 +31,14 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
+    pub fn config_path() -> AppResult<PathBuf> {
+        let dirs = ProjectDirs::from("dev", "nete", "Nete")
+            .ok_or_else(|| crate::error::AppError::Invalid("unable to resolve app dirs".into()))?;
+        let config_dir = dirs.config_dir().to_path_buf();
+        fs::create_dir_all(&config_dir)?;
+        Ok(config_dir.join("config.toml"))
+    }
+
     pub fn load_or_default() -> AppResult<Self> {
         let dirs = ProjectDirs::from("dev", "nete", "Nete")
             .ok_or_else(|| crate::error::AppError::Invalid("unable to resolve app dirs".into()))?;
@@ -75,4 +83,3 @@ impl AppConfig {
         Ok(())
     }
 }
-
