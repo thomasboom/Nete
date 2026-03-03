@@ -203,6 +203,23 @@ fn note_title_from_markdown(content: &str, fallback: &str) -> String {
     fallback.to_owned()
 }
 
+fn note_subtitle(path: &Path) -> String {
+    let filename = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("note.md")
+        .to_string();
+    let modified = fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .map(|mtime| {
+            let dt: chrono::DateTime<Local> = mtime.into();
+            dt.format("%Y-%m-%d %H:%M").to_string()
+        })
+        .unwrap_or_else(|| "unknown time".to_string());
+    format!("{filename}  •  {modified}")
+}
+
 fn clear_listbox(list: &ListBox) {
     while let Some(child) = list.first_child() {
         list.remove(&child);
@@ -244,16 +261,35 @@ fn repopulate_notes_list(ui: &UiRefs, state: &Rc<RefCell<AppState>>) {
         let title = fs::read_to_string(&path)
             .map(|txt| note_title_from_markdown(&txt, &filename))
             .unwrap_or(filename);
+        let subtitle = note_subtitle(&path);
 
         let row = ListBoxRow::new();
         row.set_selectable(true);
         row.set_activatable(true);
         row.set_widget_name(path.to_string_lossy().as_ref());
-        let label = Label::new(Some(&title));
-        label.set_halign(Align::Start);
-        label.set_xalign(0.0);
-        label.add_css_class("title-4");
-        row.set_child(Some(&label));
+
+        let card = GtkBox::new(Orientation::Vertical, 4);
+
+        let title_label = Label::new(Some(&title));
+        title_label.set_halign(Align::Start);
+        title_label.set_xalign(0.0);
+        title_label.add_css_class("heading");
+        title_label.set_margin_start(10);
+        title_label.set_margin_end(10);
+        title_label.set_margin_top(10);
+
+        let subtitle_label = Label::new(Some(&subtitle));
+        subtitle_label.set_halign(Align::Start);
+        subtitle_label.set_xalign(0.0);
+        subtitle_label.add_css_class("caption");
+        subtitle_label.add_css_class("dim-label");
+        subtitle_label.set_margin_start(10);
+        subtitle_label.set_margin_end(10);
+        subtitle_label.set_margin_bottom(10);
+
+        card.append(&title_label);
+        card.append(&subtitle_label);
+        row.set_child(Some(&card));
         ui.notes_list.append(&row);
     }
 }
@@ -491,6 +527,8 @@ fn build_ui(app: &Application) {
     let notes_list = ListBox::new();
     notes_list.set_selection_mode(SelectionMode::Single);
     notes_list.add_css_class("boxed-list");
+    notes_list.set_margin_top(4);
+    notes_list.set_margin_bottom(4);
     let notes_scroller = ScrolledWindow::builder()
         .hscrollbar_policy(PolicyType::Never)
         .min_content_height(200)
