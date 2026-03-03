@@ -346,6 +346,50 @@ fn hide_command_menu(menu_box: &GtkBox, menu_state: &Rc<RefCell<CommandMenuState
     st.items.clear();
 }
 
+fn insert_command_link_from_index(
+    index: i32,
+    app_state: &Rc<RefCell<AppState>>,
+    editor_buffer: &TextBuffer,
+    menu_box: &GtkBox,
+    menu_state: &Rc<RefCell<CommandMenuState>>,
+) -> bool {
+    if index < 0 {
+        return false;
+    }
+
+    let (title, slash_offset, replace_end_offset) = {
+        let st = menu_state.borrow();
+        let title = st.items.get(index as usize).cloned();
+        (title, st.slash_offset, st.replace_end_offset)
+    };
+
+    let (Some(title), Some(slash_offset), Some(replace_end_offset)) =
+        (title, slash_offset, replace_end_offset)
+    else {
+        hide_command_menu(menu_box, menu_state);
+        return false;
+    };
+
+    {
+        let mut st = menu_state.borrow_mut();
+        st.suppress_change = true;
+    }
+
+    let mut slash_start = editor_buffer.iter_at_offset(slash_offset);
+    let mut slash_end = editor_buffer.iter_at_offset(replace_end_offset);
+    editor_buffer.delete(&mut slash_start, &mut slash_end);
+    editor_buffer.insert_at_cursor(&format!("[[{title}]]"));
+
+    {
+        let mut st = menu_state.borrow_mut();
+        st.suppress_change = false;
+    }
+
+    app_state.borrow_mut().dirty = true;
+    hide_command_menu(menu_box, menu_state);
+    true
+}
+
 fn repopulate_notes_list(ui: &UiRefs, state: &Rc<RefCell<AppState>>) {
     clear_listbox(&ui.notes_list);
 
@@ -789,62 +833,38 @@ fn build_ui(app: &Application) {
         let command_menu_box = command_menu_box.clone();
         let command_menu_state = command_menu_state.clone();
         command_menu_list.connect_row_activated(move |_list, row| {
-            let row_index = row.index();
-            if row_index < 0 {
-                return;
-            }
-
-            let (title, slash_offset, replace_end_offset) = {
-                let menu_state = command_menu_state.borrow();
-                let title = menu_state.items.get(row_index as usize).cloned();
-                (title, menu_state.slash_offset, menu_state.replace_end_offset)
-            };
-
-            let (Some(title), Some(slash_offset), Some(replace_end_offset)) =
-                (title, slash_offset, replace_end_offset)
-            else {
-                hide_command_menu(&command_menu_box, &command_menu_state);
-                return;
-            };
-
-            {
-                let mut menu_state = command_menu_state.borrow_mut();
-                menu_state.suppress_change = true;
-            }
-
-            let mut slash_start = editor_buffer.iter_at_offset(slash_offset);
-            let mut slash_end = editor_buffer.iter_at_offset(replace_end_offset);
-            editor_buffer.delete(&mut slash_start, &mut slash_end);
-            editor_buffer.insert_at_cursor(&format!("[[{title}]]"));
-
-            {
-                let mut menu_state = command_menu_state.borrow_mut();
-                menu_state.suppress_change = false;
-            }
-
-            state.borrow_mut().dirty = true;
-            hide_command_menu(&command_menu_box, &command_menu_state);
+            let _ = insert_command_link_from_index(
+                row.index(),
+                &state,
+                &editor_buffer,
+                &command_menu_box,
+                &command_menu_state,
+            );
         });
     }
 
     {
         let command_menu_list = command_menu_list.clone();
+        let state = state.clone();
+        let editor_buffer = editor_buffer.clone();
+        let command_menu_box = command_menu_box.clone();
         let command_menu_state = command_menu_state.clone();
         let key_controller = EventControllerKey::new();
+        key_controller.set_propagation_phase(gtk::PropagationPhase::Capture);
         key_controller.connect_key_pressed(move |_controller, key, _code, _state| {
             if !command_menu_state.borrow().visible {
                 return glib::Propagation::Proceed;
             }
 
             if key == gtk::gdk::Key::Return || key == gtk::gdk::Key::KP_Enter {
-                if command_menu_list.selected_row().is_none()
-                    && let Some(first) = command_menu_list.row_at_index(0)
-                {
-                    command_menu_list.select_row(Some(&first));
-                }
-                if let Some(row) = command_menu_list.selected_row() {
-                    command_menu_list.select_row(Some(&row));
-                    command_menu_list.emit_activate_cursor_row();
+                let selected_index = command_menu_list.selected_row().map(|r| r.index()).unwrap_or(0);
+                if insert_command_link_from_index(
+                    selected_index,
+                    &state,
+                    &editor_buffer,
+                    &command_menu_box,
+                    &command_menu_state,
+                ) {
                     return glib::Propagation::Stop;
                 }
             }
