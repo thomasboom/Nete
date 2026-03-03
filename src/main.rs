@@ -5,9 +5,8 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use adw::{
-    ActionRow, Application, ApplicationWindow, Clamp, ColorScheme, ComboRow, HeaderBar,
-    OverlaySplitView, PreferencesGroup, PreferencesPage, PreferencesWindow, StyleManager,
-    ToolbarView, WindowTitle,
+    ActionRow, Application, ApplicationWindow, ColorScheme, ComboRow, HeaderBar, OverlaySplitView,
+    PreferencesGroup, PreferencesPage, PreferencesWindow, StyleManager, ToolbarView, WindowTitle,
 };
 use chrono::Local;
 use gtk::glib;
@@ -473,18 +472,8 @@ fn build_ui(app: &Application) {
     let toolbar_view = ToolbarView::new();
     let split_view = OverlaySplitView::new();
     split_view.set_show_sidebar(true);
-    split_view.set_pin_sidebar(true);
-    split_view.set_sidebar_width_fraction(0.24);
-    split_view.set_min_sidebar_width(220.0);
-    split_view.set_max_sidebar_width(320.0);
-    split_view.set_hexpand(true);
-    split_view.set_vexpand(true);
 
-    let sidebar = GtkBox::new(Orientation::Vertical, 8);
-    sidebar.set_margin_start(6);
-    sidebar.set_margin_end(6);
-    sidebar.set_margin_top(6);
-    sidebar.set_margin_bottom(6);
+    let sidebar = GtkBox::new(Orientation::Vertical, 0);
     sidebar.add_css_class("navigation-sidebar");
 
     let new_btn = Button::builder()
@@ -511,11 +500,9 @@ fn build_ui(app: &Application) {
     notes_list.add_css_class("navigation-sidebar");
     let notes_scroller = ScrolledWindow::builder()
         .hscrollbar_policy(PolicyType::Never)
-        .min_content_height(200)
         .vexpand(true)
         .build();
     notes_scroller.set_child(Some(&notes_list));
-
     sidebar.append(&notes_scroller);
 
     let editor_buffer = TextBuffer::new(None::<&gtk::TextTagTable>);
@@ -532,20 +519,10 @@ fn build_ui(app: &Application) {
         .vexpand(true)
         .hexpand(true)
         .build();
-    editor_scroller.add_css_class("card");
-    editor_scroller.set_margin_start(12);
-    editor_scroller.set_margin_end(12);
-    editor_scroller.set_margin_top(12);
-    editor_scroller.set_margin_bottom(12);
     editor_scroller.set_child(Some(&editor));
-    let editor_clamp = Clamp::builder()
-        .maximum_size(1200)
-        .tightening_threshold(600)
-        .child(&editor_scroller)
-        .build();
 
     split_view.set_sidebar(Some(&sidebar));
-    split_view.set_content(Some(&editor_clamp));
+    split_view.set_content(Some(&editor_scroller));
     toolbar_view.add_top_bar(&header);
     toolbar_view.set_content(Some(&split_view));
     window.set_content(Some(&toolbar_view));
