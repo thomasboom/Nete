@@ -109,11 +109,23 @@ struct AppState {
 
 #[derive(Default)]
 struct CommandMenuState {
-    items: Vec<String>,
+    items: Vec<CommandMenuItem>,
     slash_offset: Option<i32>,
     replace_end_offset: Option<i32>,
     visible: bool,
     suppress_change: bool,
+}
+
+#[derive(Clone)]
+enum CommandMenuAction {
+    NoteLink(String),
+    InsertText(String),
+}
+
+#[derive(Clone)]
+struct CommandMenuItem {
+    label: String,
+    action: CommandMenuAction,
 }
 
 fn config_dir() -> PathBuf {
@@ -285,6 +297,41 @@ fn linkable_note_titles(state: &Rc<RefCell<AppState>>) -> Vec<String> {
     titles
 }
 
+fn slash_menu_items(state: &Rc<RefCell<AppState>>, query: &str) -> Vec<CommandMenuItem> {
+    let normalized_query = query.to_lowercase();
+    let mut items = vec![
+        CommandMenuItem {
+            label: "Header".to_string(),
+            action: CommandMenuAction::InsertText("# ".to_string()),
+        },
+        CommandMenuItem {
+            label: "Link".to_string(),
+            action: CommandMenuAction::InsertText("[text](url)".to_string()),
+        },
+        CommandMenuItem {
+            label: "Bold".to_string(),
+            action: CommandMenuAction::InsertText("**bold text**".to_string()),
+        },
+        CommandMenuItem {
+            label: "Italic".to_string(),
+            action: CommandMenuAction::InsertText("*italic text*".to_string()),
+        },
+    ];
+
+    items.retain(|item| item.label.to_lowercase().contains(&normalized_query));
+
+    let note_items = linkable_note_titles(state)
+        .into_iter()
+        .filter(|title| title.to_lowercase().contains(&normalized_query))
+        .map(|title| CommandMenuItem {
+            label: title.clone(),
+            action: CommandMenuAction::NoteLink(title),
+        });
+    items.extend(note_items);
+
+    items
+}
+
 fn slash_query_at_cursor(buffer: &TextBuffer) -> Option<(i32, i32, String)> {
     let insert_mark = buffer.get_insert();
     let cursor = buffer.iter_at_mark(&insert_mark);
@@ -320,13 +367,13 @@ fn position_command_menu(text_view: &TextView, menu_box: &GtkBox) {
     menu_box.set_margin_top((y + 8).max(8));
 }
 
-fn populate_command_list(list: &ListBox, titles: &[String]) {
+fn populate_command_list(list: &ListBox, items: &[CommandMenuItem]) {
     clear_listbox(list);
-    for title in titles {
+    for item_data in items {
         let row = ListBoxRow::new();
         row.set_selectable(true);
         row.set_activatable(true);
-        let item = Label::new(Some(title));
+        let item = Label::new(Some(&item_data.label));
         item.set_halign(Align::Start);
         item.set_margin_top(4);
         item.set_margin_bottom(4);
@@ -346,7 +393,7 @@ fn hide_command_menu(menu_box: &GtkBox, menu_state: &Rc<RefCell<CommandMenuState
     st.items.clear();
 }
 
-fn insert_command_link_from_index(
+fn insert_command_item_from_index(
     index: i32,
     app_state: &Rc<RefCell<AppState>>,
     editor_buffer: &TextBuffer,
@@ -357,14 +404,14 @@ fn insert_command_link_from_index(
         return false;
     }
 
-    let (title, slash_offset, replace_end_offset) = {
+    let (item, slash_offset, replace_end_offset) = {
         let st = menu_state.borrow();
-        let title = st.items.get(index as usize).cloned();
-        (title, st.slash_offset, st.replace_end_offset)
+        let item = st.items.get(index as usize).cloned();
+        (item, st.slash_offset, st.replace_end_offset)
     };
 
-    let (Some(title), Some(slash_offset), Some(replace_end_offset)) =
-        (title, slash_offset, replace_end_offset)
+    let (Some(item), Some(slash_offset), Some(replace_end_offset)) =
+        (item, slash_offset, replace_end_offset)
     else {
         hide_command_menu(menu_box, menu_state);
         return false;
@@ -378,7 +425,10 @@ fn insert_command_link_from_index(
     let mut slash_start = editor_buffer.iter_at_offset(slash_offset);
     let mut slash_end = editor_buffer.iter_at_offset(replace_end_offset);
     editor_buffer.delete(&mut slash_start, &mut slash_end);
-    editor_buffer.insert_at_cursor(&format!("[[{title}]]"));
+    match item.action {
+        CommandMenuAction::NoteLink(title) => editor_buffer.insert_at_cursor(&format!("[[{title}]]")),
+        CommandMenuAction::InsertText(text) => editor_buffer.insert_at_cursor(&text),
+    }
 
     {
         let mut st = menu_state.borrow_mut();
@@ -799,17 +849,13 @@ fn build_ui(app: &Application) {
                     return;
                 }
 
-                let query = query.to_lowercase();
-                let titles = linkable_note_titles(&state)
-                    .into_iter()
-                    .filter(|title| title.to_lowercase().contains(&query))
-                    .collect::<Vec<_>>();
-                if titles.is_empty() {
+                let items = slash_menu_items(&state, &query);
+                if items.is_empty() {
                     hide_command_menu(&command_menu_box, &command_menu_state);
                     return;
                 }
 
-                populate_command_list(&command_menu_list, &titles);
+                populate_command_list(&command_menu_list, &items);
                 position_command_menu(&editor, &command_menu_box);
                 command_menu_box.set_visible(true);
                 if let Some(first_row) = command_menu_list.row_at_index(0) {
@@ -820,7 +866,7 @@ fn build_ui(app: &Application) {
                 menu_state.visible = true;
                 menu_state.slash_offset = Some(slash_offset);
                 menu_state.replace_end_offset = Some(replace_end_offset);
-                menu_state.items = titles;
+                menu_state.items = items;
             } else if command_menu_state.borrow().visible {
                 hide_command_menu(&command_menu_box, &command_menu_state);
             }
@@ -833,7 +879,7 @@ fn build_ui(app: &Application) {
         let command_menu_box = command_menu_box.clone();
         let command_menu_state = command_menu_state.clone();
         command_menu_list.connect_row_activated(move |_list, row| {
-            let _ = insert_command_link_from_index(
+            let _ = insert_command_item_from_index(
                 row.index(),
                 &state,
                 &editor_buffer,
@@ -858,7 +904,7 @@ fn build_ui(app: &Application) {
 
             if key == gtk::gdk::Key::Return || key == gtk::gdk::Key::KP_Enter {
                 let selected_index = command_menu_list.selected_row().map(|r| r.index()).unwrap_or(0);
-                if insert_command_link_from_index(
+                if insert_command_item_from_index(
                     selected_index,
                     &state,
                     &editor_buffer,
