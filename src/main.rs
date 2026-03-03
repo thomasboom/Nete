@@ -11,8 +11,8 @@ use adw::{
 use chrono::Local;
 use gtk::glib;
 use gtk::{
-    Align, Box as GtkBox, Button, FileChooserAction, FileChooserNative, ListBox, ListBoxRow,
-    EventControllerKey, Image, Label, Orientation, Overlay, PolicyType, ScrolledWindow,
+    Align, Box as GtkBox, Button, Entry, EventControllerKey, FileChooserAction, FileChooserNative,
+    Image, Label, ListBox, ListBoxRow, Orientation, Overlay, PolicyType, ScrolledWindow,
     SelectionMode, StringList, TextBuffer, TextView, TextWindowType,
 };
 use serde::{Deserialize, Serialize};
@@ -108,7 +108,7 @@ struct AppState {
 }
 
 #[derive(Default)]
-struct CommandMenuState {
+struct SlashMenuState {
     items: Vec<CommandMenuItem>,
     slash_offset: Option<i32>,
     replace_end_offset: Option<i32>,
@@ -116,17 +116,36 @@ struct CommandMenuState {
     suppress_change: bool,
 }
 
+#[derive(Default)]
+struct CommandPaletteState {
+    items: Vec<CommandMenuItem>,
+    visible: bool,
+}
+
 #[derive(Clone)]
 enum CommandMenuAction {
     NoteLink(String),
     InsertText(String),
+    OpenNote(PathBuf),
+    CreateNote,
+    ToggleSidebar,
+    OpenSettings,
+    SetLanguage(Language),
+    SetTheme(ThemeMode),
+    ChooseNotesFolder,
 }
 
 impl CommandMenuAction {
     fn icon_name(&self) -> &'static str {
         match self {
             Self::NoteLink(_) => "text-x-generic-symbolic",
-            Self::InsertText(_) => "applications-system-symbolic",
+            Self::InsertText(_) => "applications-engineering-symbolic",
+            Self::OpenNote(_) => "text-x-generic-symbolic",
+            Self::CreateNote => "document-new-symbolic",
+            Self::ToggleSidebar => "sidebar-show-symbolic",
+            Self::OpenSettings | Self::ChooseNotesFolder => "emblem-system-symbolic",
+            Self::SetLanguage(_) => "preferences-desktop-locale-symbolic",
+            Self::SetTheme(_) => "weather-clear-night-symbolic",
         }
     }
 }
@@ -176,6 +195,39 @@ fn apply_theme(theme: ThemeMode) {
         ThemeMode::Light => style.set_color_scheme(ColorScheme::ForceLight),
         ThemeMode::Dark => style.set_color_scheme(ColorScheme::ForceDark),
     };
+}
+
+fn install_command_palette_css() {
+    let provider = gtk::CssProvider::new();
+    provider.load_from_data(
+        "
+        .command-palette {
+            background-color: alpha(@window_bg_color, 1.0);
+            border-radius: 14px;
+            border: 1px solid alpha(@borders, 0.7);
+            box-shadow: 0 12px 30px alpha(black, 0.22);
+            opacity: 1;
+        }
+        .command-palette entry {
+            background-color: alpha(@window_bg_color, 1.0);
+            border: 1px solid alpha(@borders, 0.8);
+            opacity: 1;
+        }
+        .command-palette scrolledwindow,
+        .command-palette list,
+        .command-palette row {
+            background-color: alpha(@window_bg_color, 1.0);
+            opacity: 1;
+        }
+        ",
+    );
+    if let Some(display) = gtk::gdk::Display::default() {
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
 }
 
 fn text_for(lang: Language, key: &str) -> &'static str {
@@ -341,6 +393,95 @@ fn slash_menu_items(state: &Rc<RefCell<AppState>>, query: &str) -> Vec<CommandMe
     items
 }
 
+fn command_bar_items(state: &Rc<RefCell<AppState>>, query: &str) -> Vec<CommandMenuItem> {
+    let normalized_query = query.trim().to_lowercase();
+    let query_is_empty = normalized_query.is_empty();
+
+    let mut items = vec![
+        CommandMenuItem {
+            label: "Create New Note".to_string(),
+            action: CommandMenuAction::CreateNote,
+        },
+        CommandMenuItem {
+            label: "Toggle Sidebar".to_string(),
+            action: CommandMenuAction::ToggleSidebar,
+        },
+        CommandMenuItem {
+            label: "Open Settings".to_string(),
+            action: CommandMenuAction::OpenSettings,
+        },
+        CommandMenuItem {
+            label: "Choose Notes Folder".to_string(),
+            action: CommandMenuAction::ChooseNotesFolder,
+        },
+        CommandMenuItem {
+            label: "Theme: System".to_string(),
+            action: CommandMenuAction::SetTheme(ThemeMode::System),
+        },
+        CommandMenuItem {
+            label: "Theme: Light".to_string(),
+            action: CommandMenuAction::SetTheme(ThemeMode::Light),
+        },
+        CommandMenuItem {
+            label: "Theme: Dark".to_string(),
+            action: CommandMenuAction::SetTheme(ThemeMode::Dark),
+        },
+        CommandMenuItem {
+            label: "Language: English".to_string(),
+            action: CommandMenuAction::SetLanguage(Language::English),
+        },
+        CommandMenuItem {
+            label: "Language: Nederlands".to_string(),
+            action: CommandMenuAction::SetLanguage(Language::Dutch),
+        },
+        CommandMenuItem {
+            label: "Insert Header".to_string(),
+            action: CommandMenuAction::InsertText("# ".to_string()),
+        },
+        CommandMenuItem {
+            label: "Insert Link".to_string(),
+            action: CommandMenuAction::InsertText("[text](url)".to_string()),
+        },
+        CommandMenuItem {
+            label: "Insert Bold".to_string(),
+            action: CommandMenuAction::InsertText("**bold text**".to_string()),
+        },
+        CommandMenuItem {
+            label: "Insert Italic".to_string(),
+            action: CommandMenuAction::InsertText("*italic text*".to_string()),
+        },
+    ];
+
+    if !query_is_empty {
+        items.retain(|item| item.label.to_lowercase().contains(&normalized_query));
+    }
+
+    let notes_dir = state.borrow().settings.notes_dir.clone();
+    let mut note_items = Vec::new();
+    for path in list_markdown_files(&notes_dir) {
+        let filename = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("note.md")
+            .to_string();
+        let content = fs::read_to_string(&path).unwrap_or_default();
+        let title = note_title_from_markdown(&content, &filename);
+        let haystack = format!("{title}\n{filename}\n{content}").to_lowercase();
+        if query_is_empty || haystack.contains(&normalized_query) {
+            note_items.push(CommandMenuItem {
+                label: format!("Open Note: {title}"),
+                action: CommandMenuAction::OpenNote(path),
+            });
+        }
+        if query_is_empty && note_items.len() >= 10 {
+            break;
+        }
+    }
+
+    items.extend(note_items);
+    items
+}
+
 fn slash_query_at_cursor(buffer: &TextBuffer) -> Option<(i32, i32, String)> {
     let insert_mark = buffer.get_insert();
     let cursor = buffer.iter_at_mark(&insert_mark);
@@ -405,7 +546,7 @@ fn populate_command_list(list: &ListBox, items: &[CommandMenuItem]) {
     }
 }
 
-fn hide_command_menu(menu_box: &GtkBox, menu_state: &Rc<RefCell<CommandMenuState>>) {
+fn hide_slash_menu(menu_box: &GtkBox, menu_state: &Rc<RefCell<SlashMenuState>>) {
     menu_box.set_visible(false);
     let mut st = menu_state.borrow_mut();
     st.visible = false;
@@ -414,12 +555,50 @@ fn hide_command_menu(menu_box: &GtkBox, menu_state: &Rc<RefCell<CommandMenuState
     st.items.clear();
 }
 
-fn insert_command_item_from_index(
+fn hide_command_palette(menu_box: &GtkBox, menu_state: &Rc<RefCell<CommandPaletteState>>) {
+    menu_box.set_visible(false);
+    let mut st = menu_state.borrow_mut();
+    st.visible = false;
+    st.items.clear();
+}
+
+fn choose_notes_folder<W: IsA<gtk::Window>>(
+    ui: &UiRefs,
+    state: &Rc<RefCell<AppState>>,
+    transient_for: &W,
+) {
+    let language = state.borrow().settings.language;
+    let chooser = FileChooserNative::builder()
+        .title(text_for(language, "choose_notes_folder"))
+        .transient_for(transient_for)
+        .action(FileChooserAction::SelectFolder)
+        .accept_label(text_for(language, "select"))
+        .cancel_label(text_for(language, "cancel"))
+        .build();
+    let state = state.clone();
+    let ui = ui.clone();
+    chooser.connect_response(move |dialog, response| {
+        if response == gtk::ResponseType::Accept
+            && let Some(file) = dialog.file()
+            && let Some(path) = file.path()
+        {
+            let mut st = state.borrow_mut();
+            st.settings.notes_dir = path.clone();
+            save_settings(&st.settings);
+            drop(st);
+            ensure_notes_dir(&path);
+            repopulate_notes_list(&ui, &state);
+        }
+        dialog.destroy();
+    });
+    chooser.show();
+}
+
+fn insert_slash_item_from_index(
     index: i32,
-    app_state: &Rc<RefCell<AppState>>,
     editor_buffer: &TextBuffer,
     menu_box: &GtkBox,
-    menu_state: &Rc<RefCell<CommandMenuState>>,
+    menu_state: &Rc<RefCell<SlashMenuState>>,
 ) -> bool {
     if index < 0 {
         return false;
@@ -434,7 +613,7 @@ fn insert_command_item_from_index(
     let (Some(item), Some(slash_offset), Some(replace_end_offset)) =
         (item, slash_offset, replace_end_offset)
     else {
-        hide_command_menu(menu_box, menu_state);
+        hide_slash_menu(menu_box, menu_state);
         return false;
     };
 
@@ -442,22 +621,100 @@ fn insert_command_item_from_index(
         let mut st = menu_state.borrow_mut();
         st.suppress_change = true;
     }
-
     let mut slash_start = editor_buffer.iter_at_offset(slash_offset);
     let mut slash_end = editor_buffer.iter_at_offset(replace_end_offset);
     editor_buffer.delete(&mut slash_start, &mut slash_end);
     match item.action {
-        CommandMenuAction::NoteLink(title) => editor_buffer.insert_at_cursor(&format!("[[{title}]]")),
+        CommandMenuAction::NoteLink(title) => {
+            editor_buffer.insert_at_cursor(&format!("[[{title}]]"))
+        }
         CommandMenuAction::InsertText(text) => editor_buffer.insert_at_cursor(&text),
+        _ => {}
     }
-
     {
         let mut st = menu_state.borrow_mut();
         st.suppress_change = false;
     }
+    hide_slash_menu(menu_box, menu_state);
+    true
+}
 
-    app_state.borrow_mut().dirty = true;
-    hide_command_menu(menu_box, menu_state);
+fn execute_command_item_from_index(
+    index: i32,
+    ui: &UiRefs,
+    app_state: &Rc<RefCell<AppState>>,
+    editor: &TextView,
+    command_input: &Entry,
+    menu_box: &GtkBox,
+    menu_state: &Rc<RefCell<CommandPaletteState>>,
+) -> bool {
+    if index < 0 {
+        return false;
+    }
+
+    let item = {
+        let st = menu_state.borrow();
+        st.items.get(index as usize).cloned()
+    };
+
+    let Some(item) = item else {
+        hide_command_palette(menu_box, menu_state);
+        return false;
+    };
+
+    match item.action {
+        CommandMenuAction::InsertText(text) => {
+            ui.editor_buffer.insert_at_cursor(&text);
+            app_state.borrow_mut().dirty = true;
+        }
+        CommandMenuAction::NoteLink(title) => {
+            ui.editor_buffer.insert_at_cursor(&format!("[[{title}]]"));
+            app_state.borrow_mut().dirty = true;
+        }
+        CommandMenuAction::OpenNote(path) => {
+            if app_state.borrow().dirty {
+                save_current_note(ui, app_state);
+            }
+            load_note_into_editor(&path, ui, app_state);
+        }
+        CommandMenuAction::CreateNote => {
+            if app_state.borrow().dirty {
+                save_current_note(ui, app_state);
+            }
+            create_new_note(ui, app_state);
+        }
+        CommandMenuAction::ToggleSidebar => {
+            let shown = ui.split_view.shows_sidebar();
+            ui.split_view.set_show_sidebar(!shown);
+        }
+        CommandMenuAction::OpenSettings => {
+            let settings_window = build_settings_window(ui, app_state);
+            settings_window.present();
+        }
+        CommandMenuAction::SetLanguage(language) => {
+            {
+                let mut st = app_state.borrow_mut();
+                st.settings.language = language;
+                save_settings(&st.settings);
+            }
+            update_translations(ui, language);
+        }
+        CommandMenuAction::SetTheme(theme) => {
+            {
+                let mut st = app_state.borrow_mut();
+                st.settings.theme = theme;
+                save_settings(&st.settings);
+            }
+            apply_theme(theme);
+        }
+        CommandMenuAction::ChooseNotesFolder => {
+            choose_notes_folder(ui, app_state, &ui.window);
+        }
+    }
+
+    command_input.set_text("");
+    hide_command_palette(menu_box, menu_state);
+    editor.grab_focus();
     true
 }
 
@@ -675,6 +932,8 @@ fn build_settings_window(ui: &UiRefs, state: &Rc<RefCell<AppState>>) -> Preferen
 }
 
 fn build_ui(app: &Application) {
+    install_command_palette_css();
+
     let initial_settings = load_settings();
     ensure_notes_dir(&initial_settings.notes_dir);
     save_settings(&initial_settings);
@@ -745,29 +1004,61 @@ fn build_ui(app: &Application) {
     let editor_overlay = Overlay::new();
     editor_overlay.set_child(Some(&editor_scroller));
 
-    let command_menu_box = GtkBox::new(Orientation::Vertical, 0);
-    command_menu_box.set_halign(Align::Start);
-    command_menu_box.set_valign(Align::Start);
-    command_menu_box.set_margin_top(10);
-    command_menu_box.set_margin_start(8);
-    command_menu_box.set_margin_end(8);
-    command_menu_box.add_css_class("card");
-    command_menu_box.set_size_request(320, -1);
-    command_menu_box.set_visible(false);
+    let slash_menu_box = GtkBox::new(Orientation::Vertical, 0);
+    slash_menu_box.set_halign(Align::Start);
+    slash_menu_box.set_valign(Align::Start);
+    slash_menu_box.set_margin_top(10);
+    slash_menu_box.set_margin_start(8);
+    slash_menu_box.set_margin_end(8);
+    slash_menu_box.add_css_class("card");
+    slash_menu_box.set_size_request(360, -1);
+    slash_menu_box.set_visible(false);
 
-    let command_menu_list = ListBox::new();
-    command_menu_list.set_selection_mode(SelectionMode::Single);
-    command_menu_list.set_activate_on_single_click(true);
-
-    let command_menu_scroller = ScrolledWindow::builder()
+    let slash_menu_list = ListBox::new();
+    slash_menu_list.set_selection_mode(SelectionMode::Single);
+    slash_menu_list.set_activate_on_single_click(true);
+    let slash_menu_scroller = ScrolledWindow::builder()
         .hscrollbar_policy(PolicyType::Never)
         .vscrollbar_policy(PolicyType::Automatic)
         .min_content_height(70)
-        .max_content_height(240)
+        .max_content_height(260)
         .build();
-    command_menu_scroller.set_child(Some(&command_menu_list));
-    command_menu_box.append(&command_menu_scroller);
-    editor_overlay.add_overlay(&command_menu_box);
+    slash_menu_scroller.set_child(Some(&slash_menu_list));
+    slash_menu_box.append(&slash_menu_scroller);
+    editor_overlay.add_overlay(&slash_menu_box);
+
+    let command_palette_box = GtkBox::new(Orientation::Vertical, 0);
+    command_palette_box.set_halign(Align::Center);
+    command_palette_box.set_valign(Align::Start);
+    command_palette_box.set_margin_top(72);
+    command_palette_box.set_margin_start(16);
+    command_palette_box.set_margin_end(16);
+    command_palette_box.add_css_class("command-palette");
+    command_palette_box.set_size_request(980, -1);
+    command_palette_box.set_visible(false);
+
+    let command_palette_list = ListBox::new();
+    command_palette_list.set_selection_mode(SelectionMode::Single);
+    command_palette_list.set_activate_on_single_click(true);
+    let command_palette_scroller = ScrolledWindow::builder()
+        .hscrollbar_policy(PolicyType::Never)
+        .vscrollbar_policy(PolicyType::Automatic)
+        .min_content_height(240)
+        .max_content_height(520)
+        .build();
+    command_palette_scroller.set_child(Some(&command_palette_list));
+
+    let command_input = Entry::new();
+    command_input.set_placeholder_text(Some("Type a command or search notes"));
+    command_input.set_margin_top(8);
+    command_input.set_margin_start(8);
+    command_input.set_margin_end(8);
+    command_input.set_margin_bottom(4);
+    command_input.set_visible(true);
+
+    command_palette_box.append(&command_input);
+    command_palette_box.append(&command_palette_scroller);
+    editor_overlay.add_overlay(&command_palette_box);
 
     split_view.set_sidebar(Some(&sidebar));
     split_view.set_content(Some(&editor_overlay));
@@ -790,21 +1081,25 @@ fn build_ui(app: &Application) {
         settings: initial_settings.clone(),
         ..Default::default()
     }));
-    let command_menu_state = Rc::new(RefCell::new(CommandMenuState::default()));
+    let slash_menu_state = Rc::new(RefCell::new(SlashMenuState::default()));
+    let command_palette_state = Rc::new(RefCell::new(CommandPaletteState::default()));
 
     repopulate_notes_list(&ui, &state);
 
     {
         let ui = ui.clone();
         let state = state.clone();
-        let command_menu_box = command_menu_box.clone();
-        let command_menu_state = command_menu_state.clone();
+        let slash_menu_box = slash_menu_box.clone();
+        let slash_menu_state = slash_menu_state.clone();
+        let command_palette_box = command_palette_box.clone();
+        let command_palette_state = command_palette_state.clone();
         notes_list.connect_row_selected(move |_list, row| {
             if let Some(row) = row {
                 if state.borrow().dirty {
                     save_current_note(&ui, &state);
                 }
-                hide_command_menu(&command_menu_box, &command_menu_state);
+                hide_slash_menu(&slash_menu_box, &slash_menu_state);
+                hide_command_palette(&command_palette_box, &command_palette_state);
                 let path_text = row.widget_name().to_string();
                 load_note_into_editor(Path::new(&path_text), &ui, &state);
             }
@@ -814,13 +1109,16 @@ fn build_ui(app: &Application) {
     {
         let ui = ui.clone();
         let state = state.clone();
-        let command_menu_box = command_menu_box.clone();
-        let command_menu_state = command_menu_state.clone();
+        let slash_menu_box = slash_menu_box.clone();
+        let slash_menu_state = slash_menu_state.clone();
+        let command_palette_box = command_palette_box.clone();
+        let command_palette_state = command_palette_state.clone();
         new_btn.connect_clicked(move |_| {
             if state.borrow().dirty {
                 save_current_note(&ui, &state);
             }
-            hide_command_menu(&command_menu_box, &command_menu_state);
+            hide_slash_menu(&slash_menu_box, &slash_menu_state);
+            hide_command_palette(&command_palette_box, &command_palette_state);
             create_new_note(&ui, &state);
         });
     }
@@ -847,49 +1145,51 @@ fn build_ui(app: &Application) {
         let editor_buffer = editor_buffer.clone();
         let query_buffer = editor_buffer.clone();
         let editor = editor.clone();
-        let command_menu_box = command_menu_box.clone();
-        let command_menu_list = command_menu_list.clone();
-        let command_menu_state = command_menu_state.clone();
+        let slash_menu_box = slash_menu_box.clone();
+        let slash_menu_list = slash_menu_list.clone();
+        let slash_menu_state = slash_menu_state.clone();
         editor_buffer.connect_changed(move |_| {
-            if command_menu_state.borrow().suppress_change {
+            if slash_menu_state.borrow().suppress_change {
                 return;
             }
 
             let mut st = state.borrow_mut();
             if st.loading_note {
                 drop(st);
-                hide_command_menu(&command_menu_box, &command_menu_state);
+                hide_slash_menu(&slash_menu_box, &slash_menu_state);
                 return;
             }
             st.dirty = true;
             drop(st);
 
-            if let Some((slash_offset, replace_end_offset, query)) = slash_query_at_cursor(&query_buffer) {
+            if let Some((slash_offset, replace_end_offset, query)) =
+                slash_query_at_cursor(&query_buffer)
+            {
                 if query.chars().any(|ch| ch.is_whitespace()) {
-                    hide_command_menu(&command_menu_box, &command_menu_state);
+                    hide_slash_menu(&slash_menu_box, &slash_menu_state);
                     return;
                 }
 
                 let items = slash_menu_items(&state, &query);
                 if items.is_empty() {
-                    hide_command_menu(&command_menu_box, &command_menu_state);
+                    hide_slash_menu(&slash_menu_box, &slash_menu_state);
                     return;
                 }
 
-                populate_command_list(&command_menu_list, &items);
-                position_command_menu(&editor, &command_menu_box);
-                command_menu_box.set_visible(true);
-                if let Some(first_row) = command_menu_list.row_at_index(0) {
-                    command_menu_list.select_row(Some(&first_row));
+                populate_command_list(&slash_menu_list, &items);
+                position_command_menu(&editor, &slash_menu_box);
+                slash_menu_box.set_visible(true);
+                if let Some(first_row) = slash_menu_list.row_at_index(0) {
+                    slash_menu_list.select_row(Some(&first_row));
                 }
 
-                let mut menu_state = command_menu_state.borrow_mut();
+                let mut menu_state = slash_menu_state.borrow_mut();
                 menu_state.visible = true;
                 menu_state.slash_offset = Some(slash_offset);
                 menu_state.replace_end_offset = Some(replace_end_offset);
                 menu_state.items = items;
-            } else if command_menu_state.borrow().visible {
-                hide_command_menu(&command_menu_box, &command_menu_state);
+            } else if slash_menu_state.borrow().visible {
+                hide_slash_menu(&slash_menu_box, &slash_menu_state);
             }
         });
     }
@@ -897,74 +1197,278 @@ fn build_ui(app: &Application) {
     {
         let state = state.clone();
         let editor_buffer = editor_buffer.clone();
-        let command_menu_box = command_menu_box.clone();
-        let command_menu_state = command_menu_state.clone();
-        command_menu_list.connect_row_activated(move |_list, row| {
-            let _ = insert_command_item_from_index(
+        let slash_menu_box = slash_menu_box.clone();
+        let slash_menu_state = slash_menu_state.clone();
+        slash_menu_list.connect_row_activated(move |_list, row| {
+            if insert_slash_item_from_index(
                 row.index(),
-                &state,
                 &editor_buffer,
-                &command_menu_box,
-                &command_menu_state,
-            );
+                &slash_menu_box,
+                &slash_menu_state,
+            ) {
+                state.borrow_mut().dirty = true;
+            }
         });
     }
 
     {
-        let command_menu_list = command_menu_list.clone();
-        let state = state.clone();
         let editor_buffer = editor_buffer.clone();
-        let command_menu_box = command_menu_box.clone();
-        let command_menu_state = command_menu_state.clone();
+        let slash_menu_list = slash_menu_list.clone();
+        let slash_menu_box = slash_menu_box.clone();
+        let slash_menu_state = slash_menu_state.clone();
+        let state = state.clone();
         let key_controller = EventControllerKey::new();
         key_controller.set_propagation_phase(gtk::PropagationPhase::Capture);
         key_controller.connect_key_pressed(move |_controller, key, _code, _state| {
-            if !command_menu_state.borrow().visible {
+            if !slash_menu_state.borrow().visible {
                 return glib::Propagation::Proceed;
             }
 
             if key == gtk::gdk::Key::Up {
-                let selected_index = command_menu_list
+                let selected_index = slash_menu_list
                     .selected_row()
                     .map(|r| r.index())
                     .unwrap_or(0);
                 let next_index = (selected_index - 1).max(0);
-                if let Some(row) = command_menu_list.row_at_index(next_index) {
-                    command_menu_list.select_row(Some(&row));
+                if let Some(row) = slash_menu_list.row_at_index(next_index) {
+                    slash_menu_list.select_row(Some(&row));
                     row.grab_focus();
                 }
                 return glib::Propagation::Stop;
             }
 
             if key == gtk::gdk::Key::Down {
-                let selected_index = command_menu_list
+                let selected_index = slash_menu_list
                     .selected_row()
                     .map(|r| r.index())
                     .unwrap_or(-1);
                 let next_index = selected_index + 1;
-                if let Some(row) = command_menu_list.row_at_index(next_index) {
-                    command_menu_list.select_row(Some(&row));
+                if let Some(row) = slash_menu_list.row_at_index(next_index) {
+                    slash_menu_list.select_row(Some(&row));
                     row.grab_focus();
                 }
                 return glib::Propagation::Stop;
             }
 
             if key == gtk::gdk::Key::Return || key == gtk::gdk::Key::KP_Enter {
-                let selected_index = command_menu_list.selected_row().map(|r| r.index()).unwrap_or(0);
-                if insert_command_item_from_index(
+                let selected_index = slash_menu_list
+                    .selected_row()
+                    .map(|r| r.index())
+                    .unwrap_or(0);
+                if insert_slash_item_from_index(
                     selected_index,
-                    &state,
                     &editor_buffer,
-                    &command_menu_box,
-                    &command_menu_state,
+                    &slash_menu_box,
+                    &slash_menu_state,
                 ) {
+                    state.borrow_mut().dirty = true;
                     return glib::Propagation::Stop;
                 }
+            }
+
+            if key == gtk::gdk::Key::Escape {
+                hide_slash_menu(&slash_menu_box, &slash_menu_state);
+                return glib::Propagation::Stop;
             }
 
             glib::Propagation::Proceed
         });
         editor.add_controller(key_controller);
+    }
+
+    {
+        let ui = ui.clone();
+        let editor = editor.clone();
+        let state = state.clone();
+        let command_input = command_input.clone();
+        let command_palette_box = command_palette_box.clone();
+        let command_palette_list = command_palette_list.clone();
+        let command_palette_state = command_palette_state.clone();
+        command_palette_list.connect_row_activated(move |_list, row| {
+            let _ = execute_command_item_from_index(
+                row.index(),
+                &ui,
+                &state,
+                &editor,
+                &command_input,
+                &command_palette_box,
+                &command_palette_state,
+            );
+        });
+    }
+
+    {
+        let ui = ui.clone();
+        let editor = editor.clone();
+        let state = state.clone();
+        let command_input = command_input.clone();
+        let command_palette_box = command_palette_box.clone();
+        let command_palette_list = command_palette_list.clone();
+        let command_palette_state = command_palette_state.clone();
+        command_input.clone().connect_activate(move |_| {
+            if !command_palette_state.borrow().visible {
+                return;
+            }
+            let selected_index = command_palette_list
+                .selected_row()
+                .map(|r| r.index())
+                .unwrap_or(0);
+            let _ = execute_command_item_from_index(
+                selected_index,
+                &ui,
+                &state,
+                &editor,
+                &command_input,
+                &command_palette_box,
+                &command_palette_state,
+            );
+        });
+    }
+
+    {
+        let state = state.clone();
+        let command_input = command_input.clone();
+        let command_palette_box = command_palette_box.clone();
+        let command_palette_list = command_palette_list.clone();
+        let command_palette_state = command_palette_state.clone();
+        command_input.clone().connect_changed(move |entry| {
+            if !command_palette_state.borrow().visible {
+                return;
+            }
+            let items = command_bar_items(&state, &entry.text());
+            if items.is_empty() {
+                hide_command_palette(&command_palette_box, &command_palette_state);
+                return;
+            }
+            populate_command_list(&command_palette_list, &items);
+            if let Some(first_row) = command_palette_list.row_at_index(0) {
+                command_palette_list.select_row(Some(&first_row));
+            }
+            command_palette_box.set_visible(true);
+            let mut st = command_palette_state.borrow_mut();
+            st.visible = true;
+            st.items = items;
+        });
+    }
+
+    {
+        let ui = ui.clone();
+        let state = state.clone();
+        let editor = editor.clone();
+        let command_input = command_input.clone();
+        let command_palette_box = command_palette_box.clone();
+        let command_palette_list = command_palette_list.clone();
+        let command_palette_state = command_palette_state.clone();
+        let command_input_for_action = command_input.clone();
+        let editor_for_action = editor.clone();
+        let input_key_controller = EventControllerKey::new();
+        input_key_controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+        input_key_controller.connect_key_pressed(move |_controller, key, _code, _mods| {
+            if !command_palette_state.borrow().visible {
+                return glib::Propagation::Proceed;
+            }
+            if key == gtk::gdk::Key::Up {
+                let selected_index = command_palette_list
+                    .selected_row()
+                    .map(|r| r.index())
+                    .unwrap_or(0);
+                let next_index = (selected_index - 1).max(0);
+                if let Some(row) = command_palette_list.row_at_index(next_index) {
+                    command_palette_list.select_row(Some(&row));
+                    row.grab_focus();
+                }
+                return glib::Propagation::Stop;
+            }
+            if key == gtk::gdk::Key::Down {
+                let selected_index = command_palette_list
+                    .selected_row()
+                    .map(|r| r.index())
+                    .unwrap_or(-1);
+                let next_index = selected_index + 1;
+                if let Some(row) = command_palette_list.row_at_index(next_index) {
+                    command_palette_list.select_row(Some(&row));
+                    row.grab_focus();
+                }
+                return glib::Propagation::Stop;
+            }
+            if key == gtk::gdk::Key::Return || key == gtk::gdk::Key::KP_Enter {
+                let selected_index = command_palette_list
+                    .selected_row()
+                    .map(|r| r.index())
+                    .unwrap_or(0);
+                if execute_command_item_from_index(
+                    selected_index,
+                    &ui,
+                    &state,
+                    &editor_for_action,
+                    &command_input_for_action,
+                    &command_palette_box,
+                    &command_palette_state,
+                ) {
+                    return glib::Propagation::Stop;
+                }
+            }
+            if key == gtk::gdk::Key::Escape {
+                command_input_for_action.set_text("");
+                hide_command_palette(&command_palette_box, &command_palette_state);
+                editor_for_action.grab_focus();
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        command_input.add_controller(input_key_controller);
+    }
+
+    {
+        let state = state.clone();
+        let command_input = command_input.clone();
+        let command_palette_box = command_palette_box.clone();
+        let command_palette_list = command_palette_list.clone();
+        let command_palette_state = command_palette_state.clone();
+        let slash_menu_box = slash_menu_box.clone();
+        let slash_menu_state = slash_menu_state.clone();
+        let window_key_controller = EventControllerKey::new();
+        window_key_controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+        window_key_controller.connect_key_pressed(move |_controller, key, _code, mods| {
+            if key == gtk::gdk::Key::k && mods.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
+                let is_open = command_palette_state.borrow().visible;
+                if is_open {
+                    command_input.set_text("");
+                    hide_command_palette(&command_palette_box, &command_palette_state);
+                    return glib::Propagation::Stop;
+                }
+
+                hide_slash_menu(&slash_menu_box, &slash_menu_state);
+                let items = command_bar_items(&state, "");
+                if items.is_empty() {
+                    return glib::Propagation::Stop;
+                }
+                populate_command_list(&command_palette_list, &items);
+                command_input.set_text("");
+                command_palette_box.set_visible(true);
+                if let Some(first_row) = command_palette_list.row_at_index(0) {
+                    command_palette_list.select_row(Some(&first_row));
+                }
+
+                let mut st = command_palette_state.borrow_mut();
+                st.visible = true;
+                st.items = items;
+
+                command_input.grab_focus();
+                return glib::Propagation::Stop;
+            }
+            if key == gtk::gdk::Key::Escape && command_palette_state.borrow().visible {
+                command_input.set_text("");
+                hide_command_palette(&command_palette_box, &command_palette_state);
+                return glib::Propagation::Stop;
+            }
+            if key == gtk::gdk::Key::Escape && slash_menu_state.borrow().visible {
+                hide_slash_menu(&slash_menu_box, &slash_menu_state);
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        window.add_controller(window_key_controller);
     }
 
     {
