@@ -1,0 +1,53 @@
+/* Example Extension Theme
+ * 
+ * This CSS demonstrates how to customize Nete Notes appearance.
+ * Place this file next to your extension.toml.
+ * 
+ * For a full list of available CSS selectors and variables,
+ * see EXTENSIONS.md in the main repository.
+ */
+
+/* Example: Custom accent color (uncomment to use) */
+/*
+@define-color accent_color @purple_3;
+@define-color accent_bg_color @purple_4;
+*/
+
+/* Example: Custom editor font (uncomment to use) */
+/*
+textview {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 14px;
+}
+*/
+
+/* Example: Enhanced sidebar styling (uncomment to use) */
+/*
+.navigation-sidebar row {
+    border-radius: 8px;
+    margin: 2px 8px;
+}
+
+.navigation-sidebar row:selected {
+    background-color: alpha(@accent_color, 0.15);
+}
+*/
+
+/* Example: Custom command palette appearance (uncomment to use) */
+/*
+.command-palette {
+    border-radius: 16px;
+    box-shadow: 0 12px 40px alpha(black, 0.25);
+}
+*/
+
+/* 
+ * This is a minimal example file. The extension works without any CSS.
+ * Uncomment the sections above to see different customization options.
+ * 
+ * Tips:
+ * - Use @define-color to override theme colors
+ * - Use alpha() for transparent colors
+ * - Test with both light and dark system themes
+ * - Restart Nete Notes to see CSS changes
+ */

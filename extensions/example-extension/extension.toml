@@ -1,0 +1,78 @@
+# Example Nete Notes Extension
+# Place this folder in ~/.config/Nete/extensions/example-extension/
+
+[extension]
+id = "example-extension"
+name = "Example Extension"
+version = "1.0.0"
+author = "Nete Developer"
+description = "A sample extension demonstrating themes, commands, and slash menu items"
+
+# Theme configuration - optional
+[theme]
+css_file = "theme.css"
+
+# Command bar commands - optional
+[[commands]]
+id = "insert-timestamp"
+label = "Insert Timestamp"
+icon = "document-edit-symbolic"
+action = "insert_text"
+text = "📅 "
+
+[[commands]]
+id = "insert-todo"
+label = "Insert Todo Item"
+icon = "checkbox-checked-symbolic"
+action = "insert_text"
+text = "- [ ] "
+
+[[commands]]
+id = "insert-code-block"
+label = "Insert Code Block"
+icon = "text-x-generic-symbolic"
+action = "insert_text"
+text = "```\n\n```"
+
+[[commands]]
+id = "insert-horizontal-rule"
+label = "Insert Horizontal Rule"
+icon = "view-list-symbolic"
+action = "insert_text"
+text = "\n---\n"
+
+# Slash commands - optional
+[[slash_commands]]
+id = "timestamp"
+label = "Current Time"
+action = "insert_text"
+text = "⏰ "
+aliases = ["time", "clock"]
+
+[[slash_commands]]
+id = "checkbox"
+label = "Checkbox"
+action = "insert_text"
+text = "- [ ] "
+aliases = ["todo", "task"]
+
+[[slash_commands]]
+id = "code"
+label = "Code Block"
+action = "insert_text"
+text = "```\n\n```"
+aliases = ["snippet"]
+
+[[slash_commands]]
+id = "divider"
+label = "Horizontal Rule"
+action = "insert_text"
+text = "\n---\n"
+aliases = ["hr", "line"]
+
+[[slash_commands]]
+id = "link"
+label = "Note Link"
+action = "insert_note_link"
+text = "New Note"
+aliases = ["wikilink", "ref"]

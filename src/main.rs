@@ -1,3 +1,5 @@
+mod extensions;
+
 use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -16,6 +18,8 @@ use gtk::{
     SelectionMode, StringList, TextBuffer, TextView, TextWindowType,
 };
 use serde::{Deserialize, Serialize};
+
+use extensions::{ExtensionContext, ExtensionRegistry, ExtensionResult};
 
 const APP_ID: &str = "local.nete.notes";
 
@@ -105,6 +109,7 @@ struct AppState {
     current_note: Option<PathBuf>,
     dirty: bool,
     loading_note: bool,
+    extension_registry: ExtensionRegistry,
 }
 
 #[derive(Default)]
@@ -134,20 +139,24 @@ enum CommandMenuAction {
     SetLanguage(Language),
     SetTheme(ThemeMode),
     ChooseNotesFolder,
+    ExtensionCommand(String, extensions::CommandDefinition),
+    ExtensionSlashCommand(String, extensions::SlashCommandDefinition),
 }
 
 impl CommandMenuAction {
-    fn icon_name(&self) -> &'static str {
+    fn icon_name(&self) -> String {
         match self {
-            Self::NoteLink(_) => "text-x-generic-symbolic",
-            Self::InsertText(_) => "applications-engineering-symbolic",
-            Self::NoOp => "dialog-warning-symbolic",
-            Self::OpenNote(_) => "text-x-generic-symbolic",
-            Self::CreateNote => "document-new-symbolic",
-            Self::ToggleSidebar => "sidebar-show-symbolic",
-            Self::OpenSettings | Self::ChooseNotesFolder => "emblem-system-symbolic",
-            Self::SetLanguage(_) => "preferences-desktop-locale-symbolic",
-            Self::SetTheme(_) => "weather-clear-night-symbolic",
+            Self::NoteLink(_) => "text-x-generic-symbolic".to_string(),
+            Self::InsertText(_) => "applications-engineering-symbolic".to_string(),
+            Self::NoOp => "dialog-warning-symbolic".to_string(),
+            Self::OpenNote(_) => "text-x-generic-symbolic".to_string(),
+            Self::CreateNote => "document-new-symbolic".to_string(),
+            Self::ToggleSidebar => "sidebar-show-symbolic".to_string(),
+            Self::OpenSettings | Self::ChooseNotesFolder => "emblem-system-symbolic".to_string(),
+            Self::SetLanguage(_) => "preferences-desktop-locale-symbolic".to_string(),
+            Self::SetTheme(_) => "weather-clear-night-symbolic".to_string(),
+            Self::ExtensionCommand(_, def) => def.icon.clone().unwrap_or_else(|| "application-x-addon-symbolic".to_string()),
+            Self::ExtensionSlashCommand(_, _) => "application-x-addon-symbolic".to_string(),
         }
     }
 }
@@ -158,7 +167,7 @@ struct CommandMenuItem {
     action: CommandMenuAction,
 }
 
-fn config_dir() -> PathBuf {
+pub fn config_dir() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("Nete")
@@ -392,6 +401,23 @@ fn slash_menu_items(state: &Rc<RefCell<AppState>>, query: &str) -> Vec<CommandMe
         });
     items.extend(note_items);
 
+    // Add extension slash commands
+    let ext_items: Vec<CommandMenuItem> = state.borrow()
+        .extension_registry
+        .get_extension_slash_commands()
+        .into_iter()
+        .filter(|(cmd, _)| {
+            let matches_label = cmd.label.to_lowercase().contains(&normalized_query);
+            let matches_alias = cmd.aliases.iter().any(|a| a.to_lowercase().contains(&normalized_query));
+            matches_label || matches_alias
+        })
+        .map(|(cmd, ext_id)| CommandMenuItem {
+            label: cmd.label.clone(),
+            action: CommandMenuAction::ExtensionSlashCommand(ext_id, cmd),
+        })
+        .collect();
+    items.extend(ext_items);
+
     items
 }
 
@@ -481,6 +507,20 @@ fn command_bar_items(state: &Rc<RefCell<AppState>>, query: &str) -> Vec<CommandM
     }
 
     items.extend(note_items);
+
+    // Add extension commands
+    let ext_items: Vec<CommandMenuItem> = state.borrow()
+        .extension_registry
+        .get_extension_commands()
+        .into_iter()
+        .filter(|(cmd, _)| query_is_empty || cmd.label.to_lowercase().contains(&normalized_query))
+        .map(|(cmd, ext_id)| CommandMenuItem {
+            label: cmd.label.clone(),
+            action: CommandMenuAction::ExtensionCommand(ext_id, cmd),
+        })
+        .collect();
+    items.extend(ext_items);
+
     if items.is_empty() {
         items.push(CommandMenuItem {
             label: format!("No results for \"{}\"", query.trim()),
@@ -544,7 +584,7 @@ fn populate_command_list(list: &ListBox, items: &[CommandMenuItem]) {
         label.set_xalign(0.0);
         content.append(&label);
 
-        let icon = Image::from_icon_name(item_data.action.icon_name());
+        let icon = Image::from_icon_name(&item_data.action.icon_name());
         icon.add_css_class("dim-label");
         icon.set_halign(Align::End);
         content.append(&icon);
@@ -632,6 +672,7 @@ fn insert_slash_item_from_index(
     editor_buffer: &TextBuffer,
     menu_box: &GtkBox,
     menu_state: &Rc<RefCell<SlashMenuState>>,
+    state: &Rc<RefCell<AppState>>,
 ) -> bool {
     if index < 0 {
         return false;
@@ -657,11 +698,28 @@ fn insert_slash_item_from_index(
     let mut slash_start = editor_buffer.iter_at_offset(slash_offset);
     let mut slash_end = editor_buffer.iter_at_offset(replace_end_offset);
     editor_buffer.delete(&mut slash_start, &mut slash_end);
-    match item.action {
+    match &item.action {
         CommandMenuAction::NoteLink(title) => {
             editor_buffer.insert_at_cursor(&format!("[[{title}]]"))
         }
-        CommandMenuAction::InsertText(text) => editor_buffer.insert_at_cursor(&text),
+        CommandMenuAction::InsertText(text) => editor_buffer.insert_at_cursor(text),
+        CommandMenuAction::ExtensionSlashCommand(_ext_id, cmd) => {
+            let context = ExtensionContext {
+                editor_text: Some(editor_buffer.text(
+                    &editor_buffer.start_iter(),
+                    &editor_buffer.end_iter(),
+                    true,
+                ).to_string()),
+                current_note_path: state.borrow().current_note.clone(),
+                notes_dir: state.borrow().settings.notes_dir.clone(),
+            };
+            match extensions::execute_extension_action(&cmd.action, &cmd.text, &context) {
+                ExtensionResult::InsertText(text) => {
+                    editor_buffer.insert_at_cursor(&text);
+                }
+                _ => {}
+            }
+        }
         _ => {}
     }
     {
@@ -695,9 +753,9 @@ fn execute_command_item_from_index(
         return false;
     };
 
-    match item.action {
+    match &item.action {
         CommandMenuAction::InsertText(text) => {
-            ui.editor_buffer.insert_at_cursor(&text);
+            ui.editor_buffer.insert_at_cursor(text);
             app_state.borrow_mut().dirty = true;
         }
         CommandMenuAction::NoOp => return false,
@@ -709,7 +767,7 @@ fn execute_command_item_from_index(
             if app_state.borrow().dirty {
                 save_current_note(ui, app_state);
             }
-            load_note_into_editor(&path, ui, app_state);
+            load_note_into_editor(path, ui, app_state);
         }
         CommandMenuAction::CreateNote => {
             if app_state.borrow().dirty {
@@ -728,21 +786,77 @@ fn execute_command_item_from_index(
         CommandMenuAction::SetLanguage(language) => {
             {
                 let mut st = app_state.borrow_mut();
-                st.settings.language = language;
+                st.settings.language = *language;
                 save_settings(&st.settings);
             }
-            update_translations(ui, language);
+            update_translations(ui, *language);
         }
         CommandMenuAction::SetTheme(theme) => {
             {
                 let mut st = app_state.borrow_mut();
-                st.settings.theme = theme;
+                st.settings.theme = *theme;
                 save_settings(&st.settings);
             }
-            apply_theme(theme);
+            apply_theme(*theme);
+            // Re-apply extension themes on top
+            app_state.borrow().extension_registry.apply_themes();
         }
         CommandMenuAction::ChooseNotesFolder => {
             choose_notes_folder(ui, app_state, &ui.window);
+        }
+        CommandMenuAction::ExtensionCommand(_, cmd) => {
+            let context = ExtensionContext {
+                editor_text: Some(ui.editor_buffer.text(
+                    &ui.editor_buffer.start_iter(),
+                    &ui.editor_buffer.end_iter(),
+                    true,
+                ).to_string()),
+                current_note_path: app_state.borrow().current_note.clone(),
+                notes_dir: app_state.borrow().settings.notes_dir.clone(),
+            };
+            match extensions::execute_extension_action(&cmd.action, &cmd.text, &context) {
+                ExtensionResult::InsertText(text) => {
+                    ui.editor_buffer.insert_at_cursor(&text);
+                    app_state.borrow_mut().dirty = true;
+                }
+                ExtensionResult::OpenNote(title) => {
+                    // Find and open note by title
+                    let notes_dir = app_state.borrow().settings.notes_dir.clone();
+                    for path in list_markdown_files(&notes_dir) {
+                        let content = fs::read_to_string(&path).unwrap_or_default();
+                        let filename = path.file_name()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("note.md")
+                            .to_string();
+                        let note_title = note_title_from_markdown(&content, &filename);
+                        if note_title == title {
+                            if app_state.borrow().dirty {
+                                save_current_note(ui, app_state);
+                            }
+                            load_note_into_editor(&path, ui, app_state);
+                            break;
+                        }
+                    }
+                }
+                ExtensionResult::ShowMessage(msg) => {
+                    // Show a simple dialog with the message
+                    let dialog = gtk::MessageDialog::new(
+                        Some(&ui.window),
+                        gtk::DialogFlags::MODAL,
+                        gtk::MessageType::Info,
+                        gtk::ButtonsType::Ok,
+                        &msg,
+                    );
+                    dialog.connect_response(|dialog, _| {
+                        dialog.close();
+                    });
+                    dialog.show();
+                }
+                ExtensionResult::NoOp => {}
+            }
+        }
+        CommandMenuAction::ExtensionSlashCommand(_, _) => {
+            // Slash commands are handled in insert_slash_item_from_index
         }
     }
 
@@ -972,6 +1086,10 @@ fn build_ui(app: &Application) {
     ensure_notes_dir(&initial_settings.notes_dir);
     save_settings(&initial_settings);
     apply_theme(initial_settings.theme);
+    
+    // Load and apply extensions
+    let extension_registry = ExtensionRegistry::load_all();
+    extension_registry.apply_themes();
 
     let window = ApplicationWindow::builder()
         .application(app)
@@ -1116,6 +1234,7 @@ fn build_ui(app: &Application) {
 
     let state = Rc::new(RefCell::new(AppState {
         settings: initial_settings.clone(),
+        extension_registry,
         ..Default::default()
     }));
     let slash_menu_state = Rc::new(RefCell::new(SlashMenuState::default()));
@@ -1236,12 +1355,14 @@ fn build_ui(app: &Application) {
         let editor_buffer = editor_buffer.clone();
         let slash_menu_box = slash_menu_box.clone();
         let slash_menu_state = slash_menu_state.clone();
+        let state_for_slash = state.clone();
         slash_menu_list.connect_row_activated(move |_list, row| {
             if insert_slash_item_from_index(
                 row.index(),
                 &editor_buffer,
                 &slash_menu_box,
                 &slash_menu_state,
+                &state_for_slash,
             ) {
                 state.borrow_mut().dirty = true;
             }
@@ -1292,11 +1413,13 @@ fn build_ui(app: &Application) {
                     .selected_row()
                     .map(|r| r.index())
                     .unwrap_or(0);
+                let state_for_slash = state.clone();
                 if insert_slash_item_from_index(
                     selected_index,
                     &editor_buffer,
                     &slash_menu_box,
                     &slash_menu_state,
+                    &state_for_slash,
                 ) {
                     state.borrow_mut().dirty = true;
                     return glib::Propagation::Stop;
