@@ -172,41 +172,6 @@ impl ExtensionRegistry {
             .collect()
     }
 
-    /// Save the list of enabled extensions
-    pub fn save_enabled_list(&self) {
-        let enabled_path = extensions_dir().join("enabled.toml");
-        let list = EnabledList {
-            extensions: self.enabled_extensions.clone(),
-        };
-        if let Ok(serialized) = toml::to_string_pretty(&list) {
-            let _ = fs::write(&enabled_path, serialized);
-        }
-    }
-
-    /// Enable an extension
-    pub fn enable_extension(&mut self, id: &str) {
-        if !self.enabled_extensions.contains(&id.to_string()) {
-            self.enabled_extensions.push(id.to_string());
-        }
-        for ext in &mut self.extensions {
-            if ext.manifest.metadata.id == id {
-                ext.enabled = true;
-            }
-        }
-        self.save_enabled_list();
-    }
-
-    /// Disable an extension
-    pub fn disable_extension(&mut self, id: &str) {
-        self.enabled_extensions.retain(|e| e != id);
-        for ext in &mut self.extensions {
-            if ext.manifest.metadata.id == id {
-                ext.enabled = false;
-            }
-        }
-        self.save_enabled_list();
-    }
-
     /// Get all enabled extensions
     pub fn enabled(&self) -> impl Iterator<Item = &Extension> {
         self.extensions.iter().filter(|e| e.enabled)
@@ -280,8 +245,11 @@ struct EnabledList {
 /// Context passed to extension commands when executed
 #[derive(Clone, Debug)]
 pub struct ExtensionContext {
+    #[allow(dead_code)]
     pub editor_text: Option<String>,
+    #[allow(dead_code)]
     pub current_note_path: Option<PathBuf>,
+    #[allow(dead_code)]
     pub notes_dir: PathBuf,
 }
 

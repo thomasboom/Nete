@@ -139,7 +139,7 @@ enum CommandMenuAction {
     SetLanguage(Language),
     SetTheme(ThemeMode),
     ChooseNotesFolder,
-    ExtensionCommand(String, extensions::CommandDefinition),
+    ExtensionCommand(extensions::CommandDefinition),
     ExtensionSlashCommand(String, extensions::SlashCommandDefinition),
 }
 
@@ -155,7 +155,7 @@ impl CommandMenuAction {
             Self::OpenSettings | Self::ChooseNotesFolder => "emblem-system-symbolic".to_string(),
             Self::SetLanguage(_) => "preferences-desktop-locale-symbolic".to_string(),
             Self::SetTheme(_) => "weather-clear-night-symbolic".to_string(),
-            Self::ExtensionCommand(_, def) => def.icon.clone().unwrap_or_else(|| "application-x-addon-symbolic".to_string()),
+            Self::ExtensionCommand(def) => def.icon.clone().unwrap_or_else(|| "application-x-addon-symbolic".to_string()),
             Self::ExtensionSlashCommand(_, _) => "application-x-addon-symbolic".to_string(),
         }
     }
@@ -514,9 +514,9 @@ fn command_bar_items(state: &Rc<RefCell<AppState>>, query: &str) -> Vec<CommandM
         .get_extension_commands()
         .into_iter()
         .filter(|(cmd, _)| query_is_empty || cmd.label.to_lowercase().contains(&normalized_query))
-        .map(|(cmd, ext_id)| CommandMenuItem {
+        .map(|(cmd, _ext_id)| CommandMenuItem {
             label: cmd.label.clone(),
-            action: CommandMenuAction::ExtensionCommand(ext_id, cmd),
+            action: CommandMenuAction::ExtensionCommand(cmd),
         })
         .collect();
     items.extend(ext_items);
@@ -804,7 +804,7 @@ fn execute_command_item_from_index(
         CommandMenuAction::ChooseNotesFolder => {
             choose_notes_folder(ui, app_state, &ui.window);
         }
-        CommandMenuAction::ExtensionCommand(_, cmd) => {
+        CommandMenuAction::ExtensionCommand(cmd) => {
             let context = ExtensionContext {
                 editor_text: Some(ui.editor_buffer.text(
                     &ui.editor_buffer.start_iter(),
