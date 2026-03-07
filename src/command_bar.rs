@@ -453,10 +453,8 @@ pub fn execute_command_item_from_index(
 ) -> bool {
     use crate::extensions::execute_extension_action;
     use crate::note_title_from_markdown;
-    use crate::{
-        build_settings_window, choose_notes_folder, create_new_note, load_note_into_editor,
-        save_current_note,
-    };
+    use crate::settings::build_settings_window;
+    use crate::{choose_notes_folder, create_new_note, load_note_into_editor, save_current_note};
     use gtk::MessageDialog;
     use std::fs;
 
