@@ -1,7 +1,7 @@
 [package]
 name = "Nete"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 adw = { package = "libadwaita", version = "0.7", features = ["v1_4"] }

@@ -245,11 +245,10 @@ struct EnabledList {
 /// Context passed to extension commands when executed
 #[derive(Clone, Debug)]
 pub struct ExtensionContext {
-    #[allow(dead_code)]
+    // Note: These fields are reserved for future use by extension commands
+    // that need access to the editor content, current note path, or notes directory
     pub editor_text: Option<String>,
-    #[allow(dead_code)]
     pub current_note_path: Option<PathBuf>,
-    #[allow(dead_code)]
     pub notes_dir: PathBuf,
 }
 
@@ -290,11 +289,9 @@ pub fn execute_extension_action(
                 ExtensionResult::NoOp
             }
         }
-        ActionType::ExternalCommand => {
-            // For security, external commands would need explicit user permission
-            // This is a placeholder for future implementation
-            ExtensionResult::ShowMessage("External commands not yet implemented".to_string())
-        }
+        ActionType::ExternalCommand => ExtensionResult::ShowMessage(
+            "External commands are disabled for security reasons".to_string(),
+        ),
         ActionType::ToggleSetting | ActionType::SetSetting => ExtensionResult::NoOp,
     }
 }

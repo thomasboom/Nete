@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::fs;
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -25,7 +24,7 @@ pub fn repopulate_notes_list(ui: &UiRefs, state: &Rc<RefCell<AppState>>) {
             .and_then(|s| s.to_str())
             .unwrap_or("note.md")
             .to_string();
-        let title = fs::read_to_string(&path)
+        let title = crate::read_file_for_title(&path)
             .map(|txt| note_title_from_markdown(&txt, &filename))
             .unwrap_or(filename);
         let subtitle = note_subtitle(&path);

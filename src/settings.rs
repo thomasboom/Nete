@@ -100,6 +100,7 @@ pub fn build_settings_window(ui: &UiRefs, state: &Rc<RefCell<AppState>>) -> Pref
             let mut st = state.borrow_mut();
             st.settings.theme = ThemeMode::from_selected(row.selected());
             apply_theme(st.settings.theme);
+            st.extension_registry.apply_themes();
             save_settings(&st.settings);
         });
     }
@@ -122,18 +123,19 @@ pub fn build_settings_window(ui: &UiRefs, state: &Rc<RefCell<AppState>>) -> Pref
             let ui = ui.clone();
             let path_row = path_row.clone();
             chooser.connect_response(move |dialog, response| {
-                if response == gtk::ResponseType::Accept
-                    && let Some(file) = dialog.file()
-                    && let Some(path) = file.path()
-                {
-                    {
-                        let mut st = state.borrow_mut();
-                        st.settings.notes_dir = path.clone();
-                        save_settings(&st.settings);
+                if response == gtk::ResponseType::Accept {
+                    if let Some(file) = dialog.file() {
+                        if let Some(path) = file.path() {
+                            {
+                                let mut st = state.borrow_mut();
+                                st.settings.notes_dir = path.clone();
+                                save_settings(&st.settings);
+                            }
+                            crate::ensure_notes_dir(&path);
+                            path_row.set_subtitle(path.to_string_lossy().as_ref());
+                            crate::repopulate_notes_list(&ui, &state);
+                        }
                     }
-                    crate::ensure_notes_dir(&path);
-                    path_row.set_subtitle(path.to_string_lossy().as_ref());
-                    crate::repopulate_notes_list(&ui, &state);
                 }
                 dialog.destroy();
             });

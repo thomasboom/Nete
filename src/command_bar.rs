@@ -161,7 +161,6 @@ pub fn command_bar_items(
     state: &Rc<RefCell<crate::AppState>>,
     query: &str,
 ) -> Vec<CommandMenuItem> {
-    use std::fs;
     let normalized_query = query.trim().to_lowercase();
     let query_is_empty = normalized_query.is_empty();
 
@@ -224,6 +223,7 @@ pub fn command_bar_items(
         items.retain(|item| item.label.to_lowercase().contains(&normalized_query));
     }
 
+    const SEARCH_READ_BYTES: usize = 8192;
     let notes_dir = state.borrow().settings.notes_dir.clone();
     let mut note_items = Vec::new();
     for path in crate::list_markdown_files(&notes_dir) {
@@ -232,7 +232,16 @@ pub fn command_bar_items(
             .and_then(|s| s.to_str())
             .unwrap_or("note.md")
             .to_string();
-        let content = fs::read_to_string(&path).unwrap_or_default();
+        let content = std::fs::File::open(&path)
+            .ok()
+            .map(|file| {
+                let mut reader = std::io::BufReader::new(file);
+                let mut buffer = vec![0u8; SEARCH_READ_BYTES];
+                let bytes_read = std::io::Read::read(&mut reader, &mut buffer).unwrap_or(0);
+                buffer.truncate(bytes_read);
+                String::from_utf8(buffer).unwrap_or_default()
+            })
+            .unwrap_or_default();
         let title = crate::note_title_from_markdown(&content, &filename);
         let haystack = format!("{title}\n{filename}\n{content}").to_lowercase();
         if query_is_empty || haystack.contains(&normalized_query) {

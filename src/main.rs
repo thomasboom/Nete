@@ -11,27 +11,25 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use adw::{
-    Application, ApplicationWindow, ColorScheme, HeaderBar, OverlaySplitView,
-    StyleManager, ToolbarView, WindowTitle,
+    Application, ApplicationWindow, ColorScheme, HeaderBar, OverlaySplitView, StyleManager,
+    ToolbarView, WindowTitle,
 };
 use chrono::Local;
 use gtk::glib;
 use gtk::{
     Align, Box as GtkBox, Button, Entry, EventControllerKey, FileChooserAction, FileChooserNative,
-    ListBox, Orientation, Overlay, PolicyType, ScrolledWindow,
-    SelectionMode, TextBuffer, TextView,
+    ListBox, Orientation, Overlay, PolicyType, ScrolledWindow, SelectionMode, TextBuffer, TextView,
 };
 use serde::{Deserialize, Serialize};
 
 use command_bar::{
-    CommandPaletteState,
-    SlashMenuState, install_command_palette_css, hide_slash_menu,
-    hide_command_palette, slash_query_at_cursor, populate_command_list,
-    resize_command_palette, slash_menu_items, command_bar_items,
-    insert_slash_item_from_index, execute_command_item_from_index, position_command_menu,
+    command_bar_items, execute_command_item_from_index, hide_command_palette, hide_slash_menu,
+    insert_slash_item_from_index, install_command_palette_css, populate_command_list,
+    position_command_menu, resize_command_palette, slash_menu_items, slash_query_at_cursor,
+    CommandPaletteState, SlashMenuState,
 };
-use l10n::{Language, text_for, update_translations};
 use extensions::ExtensionRegistry;
+use l10n::{text_for, update_translations, Language};
 use settings::build_settings_window;
 use sidebar::repopulate_notes_list;
 
@@ -146,6 +144,17 @@ pub fn note_title_from_markdown(content: &str, fallback: &str) -> String {
     fallback.to_owned()
 }
 
+const READ_TITLE_BYTES: usize = 1024;
+
+pub fn read_file_for_title(path: &Path) -> Option<String> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut reader = std::io::BufReader::new(file);
+    let mut buffer = vec![0u8; READ_TITLE_BYTES];
+    let bytes_read = std::io::Read::read(&mut reader, &mut buffer).ok()?;
+    buffer.truncate(bytes_read);
+    String::from_utf8(buffer).ok()
+}
+
 fn note_subtitle(path: &Path) -> String {
     let filename = path
         .file_name()
@@ -198,7 +207,7 @@ pub fn linkable_note_titles(state: &Rc<RefCell<AppState>>) -> Vec<String> {
             .and_then(|s| s.to_str())
             .unwrap_or("note.md")
             .to_string();
-        let title = fs::read_to_string(&path)
+        let title = read_file_for_title(&path)
             .map(|txt| note_title_from_markdown(&txt, &filename))
             .unwrap_or(filename);
         titles.push(title);
@@ -254,16 +263,17 @@ pub fn choose_notes_folder<W: IsA<gtk::Window>>(
     let state = state.clone();
     let ui = ui.clone();
     chooser.connect_response(move |dialog, response| {
-        if response == gtk::ResponseType::Accept
-            && let Some(file) = dialog.file()
-            && let Some(path) = file.path()
-        {
-            let mut st = state.borrow_mut();
-            st.settings.notes_dir = path.clone();
-            save_settings(&st.settings);
-            drop(st);
-            ensure_notes_dir(&path);
-            repopulate_notes_list(&ui, &state);
+        if response == gtk::ResponseType::Accept {
+            if let Some(file) = dialog.file() {
+                if let Some(path) = file.path() {
+                    let mut st = state.borrow_mut();
+                    st.settings.notes_dir = path.clone();
+                    save_settings(&st.settings);
+                    drop(st);
+                    ensure_notes_dir(&path);
+                    repopulate_notes_list(&ui, &state);
+                }
+            }
         }
         dialog.destroy();
     });
@@ -271,7 +281,13 @@ pub fn choose_notes_folder<W: IsA<gtk::Window>>(
 }
 
 pub fn load_note_into_editor(path: &Path, ui: &UiRefs, state: &Rc<RefCell<AppState>>) {
-    let content = fs::read_to_string(path).unwrap_or_default();
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to load note {:?}: {}", path, e);
+            String::new()
+        }
+    };
     {
         let mut st = state.borrow_mut();
         st.loading_note = true;
@@ -304,7 +320,7 @@ fn build_ui(app: &Application) {
     ensure_notes_dir(&initial_settings.notes_dir);
     save_settings(&initial_settings);
     apply_theme(initial_settings.theme);
-    
+
     // Load and apply extensions
     let extension_registry = ExtensionRegistry::load_all();
     extension_registry.apply_themes();
@@ -475,7 +491,10 @@ fn build_ui(app: &Application) {
                 hide_slash_menu(&slash_menu_box, &slash_menu_state);
                 hide_command_palette(&command_palette_box, &command_palette_state);
                 let path_text = row.widget_name().to_string();
-                load_note_into_editor(Path::new(&path_text), &ui, &state);
+                let path = Path::new(&path_text);
+                if path.is_file() {
+                    load_note_into_editor(path, &ui, &state);
+                }
             }
         });
     }
@@ -872,7 +891,7 @@ fn build_ui(app: &Application) {
     {
         let ui = ui.clone();
         let state = state.clone();
-        glib::timeout_add_seconds_local(2, move || {
+        glib::timeout_add_seconds_local(10, move || {
             if state.borrow().dirty {
                 save_current_note(&ui, &state);
                 repopulate_notes_list(&ui, &state);
