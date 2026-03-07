@@ -1,5 +1,6 @@
 mod command_bar;
 mod extensions;
+mod l10n;
 
 use std::cell::RefCell;
 use std::fs;
@@ -21,12 +22,13 @@ use gtk::{
 use serde::{Deserialize, Serialize};
 
 use command_bar::{
-    update_translations, CommandPaletteState, Language,
-    SlashMenuState, install_command_palette_css, text_for, hide_slash_menu,
+    CommandPaletteState,
+    SlashMenuState, install_command_palette_css, hide_slash_menu,
     hide_command_palette, slash_query_at_cursor, populate_command_list,
     resize_command_palette, slash_menu_items, command_bar_items,
     insert_slash_item_from_index, execute_command_item_from_index, position_command_menu,
 };
+use l10n::{Language, text_for, update_translations};
 use extensions::ExtensionRegistry;
 
 const APP_ID: &str = "local.nete.notes";
@@ -258,7 +260,7 @@ pub fn choose_notes_folder<W: IsA<gtk::Window>>(
     state: &Rc<RefCell<AppState>>,
     transient_for: &W,
 ) {
-    use command_bar::text_for;
+    use l10n::text_for;
     let language = state.borrow().settings.language;
     let chooser = FileChooserNative::builder()
         .title(text_for(language, "choose_notes_folder"))
@@ -331,7 +333,7 @@ pub fn create_new_note(ui: &UiRefs, state: &Rc<RefCell<AppState>>) {
 }
 
 pub fn build_settings_window(ui: &UiRefs, state: &Rc<RefCell<AppState>>) -> PreferencesWindow {
-    use command_bar::text_for;
+    use l10n::text_for;
     let st = state.borrow();
     let settings_window = PreferencesWindow::builder()
         .transient_for(&ui.window)
