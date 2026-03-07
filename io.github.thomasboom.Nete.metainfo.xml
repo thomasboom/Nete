@@ -6,7 +6,7 @@
   <summary>A simple markdown note-taking app</summary>
 
   <description>
-    <p>Nete is a minimal, distraction-free markdown note-taking app built for Linux.</p>
+    <p>Nete is a minimal, distraction-free markdown note-taking app built for Linux. Write and organize your notes in plain Markdown without clutter or complexity getting in the way.</p>
   </description>
 
   <launchable type="desktop-id">io.github.thomasboom.Nete.desktop</launchable>
