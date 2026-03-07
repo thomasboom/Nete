@@ -172,7 +172,6 @@ pub fn install_command_palette_css() {
 }
 
 pub fn slash_menu_items(state: &Rc<RefCell<crate::AppState>>, query: &str) -> Vec<CommandMenuItem> {
-    use std::fs;
     let normalized_query = query.to_lowercase();
     let mut items = vec![
         CommandMenuItem {
@@ -525,7 +524,7 @@ pub fn execute_command_item_from_index(
     use crate::note_title_from_markdown;
     use crate::{
         build_settings_window, choose_notes_folder, create_new_note, load_note_into_editor,
-        repopulate_notes_list, save_current_note,
+        save_current_note,
     };
     use gtk::MessageDialog;
     use std::fs;

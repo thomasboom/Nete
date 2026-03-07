@@ -15,19 +15,19 @@ use chrono::Local;
 use gtk::glib;
 use gtk::{
     Align, Box as GtkBox, Button, Entry, EventControllerKey, FileChooserAction, FileChooserNative,
-    Image, Label, ListBox, ListBoxRow, Orientation, Overlay, PolicyType, ScrolledWindow,
-    SelectionMode, StringList, TextBuffer, TextView, TextWindowType,
+    ListBox, ListBoxRow, Orientation, Overlay, PolicyType, ScrolledWindow,
+    SelectionMode, StringList, TextBuffer, TextView,
 };
 use serde::{Deserialize, Serialize};
 
 use command_bar::{
-    update_translations, CommandMenuAction, CommandMenuItem, CommandPaletteState, Language,
+    update_translations, CommandPaletteState, Language,
     SlashMenuState, install_command_palette_css, text_for, hide_slash_menu,
     hide_command_palette, slash_query_at_cursor, populate_command_list,
     resize_command_palette, slash_menu_items, command_bar_items,
     insert_slash_item_from_index, execute_command_item_from_index, position_command_menu,
 };
-use extensions::{ExtensionContext, ExtensionRegistry, ExtensionResult};
+use extensions::ExtensionRegistry;
 
 const APP_ID: &str = "local.nete.notes";
 
