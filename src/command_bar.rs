@@ -226,32 +226,55 @@ pub fn command_bar_items(
     const SEARCH_READ_BYTES: usize = 8192;
     let notes_dir = state.borrow().settings.notes_dir.clone();
     let mut note_items = Vec::new();
-    for path in crate::list_markdown_files(&notes_dir) {
+
+    let paths: Vec<_> = crate::list_markdown_files(&notes_dir);
+
+    for path in paths.iter().take(if query_is_empty { 10 } else { 50 }) {
         let filename = path
             .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("note.md")
             .to_string();
-        let content = std::fs::File::open(&path)
-            .ok()
-            .map(|file| {
-                let mut reader = std::io::BufReader::new(file);
-                let mut buffer = vec![0u8; SEARCH_READ_BYTES];
-                let bytes_read = std::io::Read::read(&mut reader, &mut buffer).unwrap_or(0);
-                buffer.truncate(bytes_read);
-                String::from_utf8(buffer).unwrap_or_default()
-            })
-            .unwrap_or_default();
-        let title = crate::note_title_from_markdown(&content, &filename);
-        let haystack = format!("{title}\n{filename}\n{content}").to_lowercase();
-        if query_is_empty || haystack.contains(&normalized_query) {
+
+        let title = if query_is_empty {
+            crate::get_cached_title(state, path, &filename)
+        } else {
+            let content = std::fs::File::open(path)
+                .ok()
+                .map(|file| {
+                    let mut reader = std::io::BufReader::new(file);
+                    let mut buffer = vec![0u8; SEARCH_READ_BYTES];
+                    let bytes_read = std::io::Read::read(&mut reader, &mut buffer).unwrap_or(0);
+                    buffer.truncate(bytes_read);
+                    String::from_utf8(buffer).unwrap_or_default()
+                })
+                .unwrap_or_default();
+            crate::note_title_from_markdown(&content, &filename)
+        };
+
+        if query_is_empty {
             note_items.push(CommandMenuItem {
                 label: format!("Open Note: {title}"),
-                action: CommandMenuAction::OpenNote(path),
+                action: CommandMenuAction::OpenNote(path.clone()),
             });
-        }
-        if query_is_empty && note_items.len() >= 10 {
-            break;
+        } else {
+            let content = std::fs::File::open(path)
+                .ok()
+                .map(|file| {
+                    let mut reader = std::io::BufReader::new(file);
+                    let mut buffer = vec![0u8; SEARCH_READ_BYTES];
+                    let bytes_read = std::io::Read::read(&mut reader, &mut buffer).unwrap_or(0);
+                    buffer.truncate(bytes_read);
+                    String::from_utf8(buffer).unwrap_or_default()
+                })
+                .unwrap_or_default();
+            let haystack = format!("{title}\n{filename}\n{content}").to_lowercase();
+            if haystack.contains(&normalized_query) {
+                note_items.push(CommandMenuItem {
+                    label: format!("Open Note: {title}"),
+                    action: CommandMenuAction::OpenNote(path.clone()),
+                });
+            }
         }
     }
 
@@ -434,11 +457,10 @@ pub fn insert_slash_item_from_index(
                 current_note_path: state.borrow().current_note.clone(),
                 notes_dir: state.borrow().settings.notes_dir.clone(),
             };
-            match execute_extension_action(&cmd.action, &cmd.text, &context) {
-                ExtensionResult::InsertText(text) => {
-                    editor_buffer.insert_at_cursor(&text);
-                }
-                _ => {}
+            if let ExtensionResult::InsertText(text) =
+                execute_extension_action(&cmd.action, &cmd.text, &context)
+            {
+                editor_buffer.insert_at_cursor(&text);
             }
         }
         _ => {}

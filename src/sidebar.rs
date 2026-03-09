@@ -6,9 +6,8 @@ use adw::ActionRow;
 use gtk::{ListBox, ListBoxRow};
 
 use crate::note_subtitle;
-use crate::note_title_from_markdown;
 use crate::AppState;
-use crate::UiRefs;
+use crate::{get_cached_title, UiRefs};
 
 pub fn repopulate_notes_list(ui: &UiRefs, state: &Rc<RefCell<AppState>>) {
     clear_listbox(&ui.notes_list);
@@ -24,9 +23,7 @@ pub fn repopulate_notes_list(ui: &UiRefs, state: &Rc<RefCell<AppState>>) {
             .and_then(|s| s.to_str())
             .unwrap_or("note.md")
             .to_string();
-        let title = crate::read_file_for_title(&path)
-            .map(|txt| note_title_from_markdown(&txt, &filename))
-            .unwrap_or(filename);
+        let title = get_cached_title(state, &path, &filename);
         let subtitle = note_subtitle(&path);
 
         let row = ListBoxRow::new();

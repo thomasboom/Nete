@@ -5,6 +5,7 @@ mod settings;
 mod sidebar;
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -100,6 +101,7 @@ pub struct AppState {
     dirty: bool,
     loading_note: bool,
     extension_registry: ExtensionRegistry,
+    title_cache: HashMap<PathBuf, String>,
 }
 
 pub fn config_dir() -> PathBuf {
@@ -110,6 +112,38 @@ pub fn config_dir() -> PathBuf {
 
 fn settings_path() -> PathBuf {
     config_dir().join("settings.toml")
+}
+
+pub fn get_cached_title(state: &Rc<RefCell<AppState>>, path: &Path, filename: &str) -> String {
+    {
+        let st = state.borrow();
+        if let Some(cached) = st.title_cache.get(path) {
+            return cached.clone();
+        }
+    }
+
+    let title = read_file_for_title(path)
+        .map(|txt| note_title_from_markdown(&txt, filename))
+        .unwrap_or_else(|| filename.to_string());
+
+    {
+        let mut st = state.borrow_mut();
+        st.title_cache.insert(path.to_path_buf(), title.clone());
+    }
+
+    title
+}
+
+pub fn invalidate_title_cache(state: &Rc<RefCell<AppState>>, path: Option<&Path>) {
+    let mut st = state.borrow_mut();
+    match path {
+        Some(p) => {
+            st.title_cache.remove(p);
+        }
+        None => {
+            st.title_cache.clear();
+        }
+    }
 }
 
 fn load_settings() -> AppSettings {
@@ -207,9 +241,7 @@ pub fn linkable_note_titles(state: &Rc<RefCell<AppState>>) -> Vec<String> {
             .and_then(|s| s.to_str())
             .unwrap_or("note.md")
             .to_string();
-        let title = read_file_for_title(&path)
-            .map(|txt| note_title_from_markdown(&txt, &filename))
-            .unwrap_or(filename);
+        let title = get_cached_title(state, &path, &filename);
         titles.push(title);
     }
 
@@ -240,8 +272,9 @@ pub fn save_current_note(ui: &UiRefs, state: &Rc<RefCell<AppState>>) {
                 true,
             )
             .to_string();
-        if fs::write(path, text).is_ok() {
+        if fs::write(&path, text).is_ok() {
             state.borrow_mut().dirty = false;
+            invalidate_title_cache(state, Some(&path));
         }
     }
 }
@@ -299,6 +332,7 @@ pub fn load_note_into_editor(path: &Path, ui: &UiRefs, state: &Rc<RefCell<AppSta
         st.loading_note = false;
         st.dirty = false;
     }
+    invalidate_title_cache(state, Some(path));
 }
 
 pub fn create_new_note(ui: &UiRefs, state: &Rc<RefCell<AppState>>) {

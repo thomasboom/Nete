@@ -100,18 +100,10 @@ pub enum ActionType {
 }
 
 /// The extension registry manages all loaded extensions
+#[derive(Default)]
 pub struct ExtensionRegistry {
     pub extensions: Vec<Extension>,
     pub enabled_extensions: Vec<String>,
-}
-
-impl Default for ExtensionRegistry {
-    fn default() -> Self {
-        Self {
-            extensions: Vec::new(),
-            enabled_extensions: Vec::new(),
-        }
-    }
 }
 
 impl ExtensionRegistry {
@@ -244,6 +236,7 @@ struct EnabledList {
 
 /// Context passed to extension commands when executed
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct ExtensionContext {
     // Note: These fields are reserved for future use by extension commands
     // that need access to the editor content, current note path, or notes directory
