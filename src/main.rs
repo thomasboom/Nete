@@ -146,6 +146,10 @@ pub fn invalidate_title_cache(state: &Rc<RefCell<AppState>>, path: Option<&Path>
     }
 }
 
+pub fn clear_title_cache(state: &Rc<RefCell<AppState>>) {
+    state.borrow_mut().title_cache.clear();
+}
+
 fn load_settings() -> AppSettings {
     let path = settings_path();
     let Ok(content) = fs::read_to_string(path) else {
@@ -207,7 +211,7 @@ fn note_subtitle(path: &Path) -> String {
 }
 
 pub fn list_markdown_files(dir: &Path) -> Vec<PathBuf> {
-    let mut files = vec![];
+    let mut files: Vec<PathBuf> = vec![];
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -216,12 +220,20 @@ pub fn list_markdown_files(dir: &Path) -> Vec<PathBuf> {
             }
         }
     }
-    files.sort_by(|a, b| {
-        let a_time = fs::metadata(a).and_then(|m| m.modified()).ok();
-        let b_time = fs::metadata(b).and_then(|m| m.modified()).ok();
-        b_time.cmp(&a_time)
-    });
-    files
+
+    let mut files_with_time: Vec<(PathBuf, std::time::SystemTime)> = files
+        .into_iter()
+        .filter_map(|p| {
+            fs::metadata(&p)
+                .and_then(|m| m.modified())
+                .ok()
+                .map(|t| (p, t))
+        })
+        .collect();
+
+    files_with_time.sort_by(|a, b| b.1.cmp(&a.1));
+
+    files_with_time.into_iter().map(|(p, _)| p).collect()
 }
 
 pub fn linkable_note_titles(state: &Rc<RefCell<AppState>>) -> Vec<String> {
@@ -250,15 +262,24 @@ pub fn linkable_note_titles(state: &Rc<RefCell<AppState>>) -> Vec<String> {
 
 pub fn save_settings(settings: &AppSettings) {
     let cfg_dir = config_dir();
-    let _ = fs::create_dir_all(&cfg_dir);
+    if let Err(e) = fs::create_dir_all(&cfg_dir) {
+        eprintln!("Failed to create config directory: {}", e);
+        return;
+    }
     let path = settings_path();
-    if let Ok(serialized) = toml::to_string_pretty(settings) {
-        let _ = fs::write(path, serialized);
+    let Ok(serialized) = toml::to_string_pretty(settings) else {
+        eprintln!("Failed to serialize settings");
+        return;
+    };
+    if let Err(e) = fs::write(path, serialized) {
+        eprintln!("Failed to write settings: {}", e);
     }
 }
 
 fn ensure_notes_dir(path: &Path) {
-    let _ = fs::create_dir_all(path);
+    if let Err(e) = fs::create_dir_all(path) {
+        eprintln!("Failed to create notes directory: {}", e);
+    }
 }
 
 pub fn save_current_note(ui: &UiRefs, state: &Rc<RefCell<AppState>>) {
@@ -272,10 +293,12 @@ pub fn save_current_note(ui: &UiRefs, state: &Rc<RefCell<AppState>>) {
                 true,
             )
             .to_string();
-        if fs::write(&path, text).is_ok() {
-            state.borrow_mut().dirty = false;
-            invalidate_title_cache(state, Some(&path));
+        if let Err(e) = fs::write(&path, &text) {
+            eprintln!("Failed to save note: {}", e);
+            return;
         }
+        state.borrow_mut().dirty = false;
+        invalidate_title_cache(state, Some(&path));
     }
 }
 
@@ -341,10 +364,12 @@ pub fn create_new_note(ui: &UiRefs, state: &Rc<RefCell<AppState>>) {
     let name = format!("note-{}.md", Local::now().format("%Y%m%d-%H%M%S"));
     let path = dir.join(name);
     let initial = "# New note\n";
-    if fs::write(&path, initial).is_ok() {
-        repopulate_notes_list(ui, state);
-        load_note_into_editor(&path, ui, state);
+    if let Err(e) = fs::write(&path, initial) {
+        eprintln!("Failed to create new note: {}", e);
+        return;
     }
+    repopulate_notes_list(ui, state);
+    load_note_into_editor(&path, ui, state);
 }
 
 fn build_ui(app: &Application) {

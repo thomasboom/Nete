@@ -131,6 +131,7 @@ pub fn build_settings_window(ui: &UiRefs, state: &Rc<RefCell<AppState>>) -> Pref
                                 st.settings.notes_dir = path.clone();
                                 save_settings(&st.settings);
                             }
+                            crate::clear_title_cache(&state);
                             crate::ensure_notes_dir(&path);
                             path_row.set_subtitle(path.to_string_lossy().as_ref());
                             crate::repopulate_notes_list(&ui, &state);
